@@ -60,11 +60,13 @@
 	);
 
 	function cursorFor(p: Pen) {
+		const arrow = 'M2 2 L2 19 L6.5 14.5 L9.5 21.5 L12.5 20.2 L9.6 13.4 L15.5 13.4 Z';
 		const svg =
-			p === 'white'
-				? `<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22'><rect x='3' y='3' width='16' height='16' fill='white' stroke='black' stroke-width='2'/></svg>`
-				: `<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22'><rect x='2' y='2' width='18' height='18' fill='white'/><rect x='4' y='4' width='14' height='14' fill='black'/></svg>`;
-		return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 11 11, crosshair`;
+			`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+			`<path d='${arrow}' fill='none' stroke='white' stroke-width='3.5' stroke-linejoin='round'/>` +
+			`<path d='${arrow}' fill='${p}' stroke='black' stroke-width='1.5' stroke-linejoin='round'/>` +
+			`</svg>`;
+		return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 2 2, default`;
 	}
 
 	function start() {
