@@ -240,7 +240,7 @@
 </script>
 
 <svelte:head>
-	<title>Cube net crossword</title>
+	<title>Nets</title>
 </svelte:head>
 
 <svelte:window onkeydown={onWindowKey} onpointerup={() => (painting = false)} />
@@ -248,18 +248,15 @@
 <main class="mat">
 	{#if n === null}
 		<section class="setup">
-			<h1>Cube net crossword</h1>
-			<p>
-				A crossword on the six faces of a cube, unfolded flat. Choose how many squares each face has
-				along a side.
-			</p>
+			<h1>Nets</h1>
+			<p>A crossword on the six faces of a cube, unfolded flat.</p>
 			<form
 				onsubmit={(e) => {
 					e.preventDefault();
 					start();
 				}}
 			>
-				<label for="size">Face size (n)</label>
+				<label for="size">Face size</label>
 				<div class="size-row">
 					<button
 						type="button"
@@ -274,7 +271,6 @@
 						aria-label="Larger"
 						onclick={() => (sizeInput = Math.min(MAX_N, sizeInput + 1))}>+</button
 					>
-					<span class="dims">each face is {sizeInput} × {sizeInput}</span>
 				</div>
 				<button
 					type="submit"
@@ -311,8 +307,6 @@
 			</nav>
 
 			<div class="row">
-				<h1 class="title">Cube net crossword</h1>
-
 				<div class="tools">
 					<button
 						class="pen"
@@ -341,6 +335,7 @@
 							{/if}
 						</svg>
 						{shownAxis === 'across' ? 'Across' : 'Down'}
+						<kbd>⏎</kbd>
 					</button>
 
 					<div class="group" role="group" aria-label="Turn and flip the net">
@@ -476,16 +471,6 @@
 				/>
 			</div>
 		</div>
-
-		<p class="hint">
-			{#if editing}
-				Type to fill the word. Enter turns it across or down; Esc finishes.
-			{:else if pen === 'black'}
-				Click or drag over white squares to block them. Space switches to the white pen.
-			{:else}
-				Double-click a white square to type. Click black squares to clear them. Space switches pens.
-			{/if}
-		</p>
 	{/if}
 </main>
 
@@ -629,11 +614,6 @@
 	.step:hover {
 		background: #f1f1ee;
 	}
-	.dims {
-		margin-left: 0.4rem;
-		font-size: 0.9rem;
-		color: #4a4f4c;
-	}
 	.primary {
 		width: 100%;
 		padding: 0.85rem 1rem;
@@ -660,16 +640,14 @@
 	.row {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: center;
 		flex-wrap: wrap;
 		gap: 0.75rem;
-	}
-	.title {
-		font-size: 1.1rem;
 	}
 	.tools {
 		display: flex;
 		align-items: center;
+		justify-content: center;
 		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
@@ -899,14 +877,6 @@
 		font-size: 16px;
 		pointer-events: none;
 		caret-color: transparent;
-	}
-
-	.hint {
-		margin: 0;
-		padding: 0.6rem 1.25rem 1rem;
-		text-align: center;
-		font-size: 0.875rem;
-		color: var(--on-mat-dim);
 	}
 
 	@media (max-width: 640px) {
