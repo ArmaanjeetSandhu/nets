@@ -3,6 +3,7 @@
 	import NetIcon from '$lib/NetIcon.svelte';
 	import {
 		NETS,
+		FAMILIES,
 		IDENTITY,
 		allKeys,
 		buildView,
@@ -285,18 +286,25 @@
 	{:else if view}
 		<header class="bar">
 			<nav class="nets" aria-label="Cube nets">
-				{#each NETS as net, i (i)}
-					<button
-						class="net"
-						class:active={netIndex === i}
-						aria-pressed={netIndex === i}
-						aria-label="Net {i + 1} of 11"
-						title="Net {i + 1}"
-						onmousedown={keepFocus}
-						onclick={() => setView(() => (netIndex = i))}
-					>
-						<NetIcon {net} {transform} size={30} />
-					</button>
+				{#each FAMILIES as family (family.name)}
+					<div class="family" role="group" aria-label="{family.name} family">
+						<span class="family-label" title={family.description}>{family.name}</span>
+						<div class="family-nets">
+							{#each family.nets as i (i)}
+								<button
+									class="net"
+									class:active={netIndex === i}
+									aria-pressed={netIndex === i}
+									aria-label="Net {i + 1} of {NETS.length}, {family.name} family"
+									title="Net {i + 1} ({family.name})"
+									onmousedown={keepFocus}
+									onclick={() => setView(() => (netIndex = i))}
+								>
+									<NetIcon net={NETS[i]} {transform} size={30} />
+								</button>
+							{/each}
+						</div>
+					</div>
 				{/each}
 			</nav>
 
@@ -489,11 +497,10 @@
 		-webkit-font-smoothing: antialiased;
 	}
 
-	/* A self-healing cutting mat, with the net laid on it like a die-cut sheet. */
 	.mat {
 		--mat: #2f5b4c;
-		--mat-line: rgb(255 255 255 / 0.07);
-		--mat-line-strong: rgb(255 255 255 / 0.15);
+		--dot-pitch: 9px;
+		--halftone-strength: 0.1;
 		--rule: #e6cf5c;
 		--paper: #ffffff;
 		--ink: #161616;
@@ -510,17 +517,28 @@
 		flex-direction: column;
 		color: var(--on-mat);
 		background-color: var(--mat);
+		position: relative;
+		isolation: isolate;
+	}
+
+	.mat::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		z-index: -1;
+		pointer-events: none;
 		background-image:
-			linear-gradient(var(--mat-line-strong) 1px, transparent 1px),
-			linear-gradient(90deg, var(--mat-line-strong) 1px, transparent 1px),
-			linear-gradient(var(--mat-line) 1px, transparent 1px),
-			linear-gradient(90deg, var(--mat-line) 1px, transparent 1px);
+			radial-gradient(circle closest-side, #fff, #000),
+			radial-gradient(ellipse 85% 85% at 0% 0%, #fff, #6e6e6e 100%),
+			radial-gradient(ellipse 85% 85% at 100% 100%, #fff, #6e6e6e 100%);
 		background-size:
-			120px 120px,
-			120px 120px,
-			24px 24px,
-			24px 24px;
-		background-position: -1px -1px;
+			var(--dot-pitch) var(--dot-pitch),
+			100% 100%,
+			100% 100%;
+		background-blend-mode: multiply, lighten, normal;
+		filter: contrast(24);
+		mix-blend-mode: screen;
+		opacity: var(--halftone-strength);
 	}
 
 	@media (prefers-color-scheme: dark) {
@@ -546,7 +564,6 @@
 		outline-offset: 2px;
 	}
 
-	/* ---- Setup ---- */
 	.setup {
 		margin: auto;
 		width: min(26rem, calc(100% - 2rem));
@@ -632,7 +649,6 @@
 		cursor: not-allowed;
 	}
 
-	/* ---- Toolbar ---- */
 	.bar {
 		padding: 0.75rem 1.25rem 0.25rem;
 		display: flex;
@@ -750,10 +766,37 @@
 	.nets {
 		display: flex;
 		justify-content: center;
-		gap: 0.35rem;
+		align-items: flex-end;
+		gap: 0.9rem;
 		overflow-x: auto;
 		padding-bottom: 0.25rem;
 		scrollbar-width: thin;
+	}
+	.family {
+		flex: 0 0 auto;
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.2rem;
+	}
+	.family + .family {
+		padding-left: 0.9rem;
+		border-left: 1px solid rgb(255 255 255 / 0.18);
+	}
+	.family-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		font-variant-numeric: tabular-nums;
+		color: var(--on-mat-dim);
+		text-align: center;
+		padding-bottom: 0.15rem;
+		border-bottom: 1px solid rgb(255 255 255 / 0.18);
+		cursor: default;
+	}
+	.family-nets {
+		display: flex;
+		gap: 0.35rem;
 	}
 	.net {
 		flex: 0 0 auto;
@@ -777,7 +820,6 @@
 		--icon-stroke: var(--mat);
 	}
 
-	/* ---- Stage ---- */
 	.stage {
 		flex: 1;
 		min-height: 0;
