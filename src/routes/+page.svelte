@@ -33,6 +33,15 @@
 	let transform = $state<Transform>(IDENTITY);
 	const view = $derived(n === null ? null : buildView(netIndex, transform, n));
 
+	let sidebarOpen = $state(true);
+	const NARROW = '(max-width: 640px)';
+	const isNarrow = () => typeof matchMedia === 'function' && matchMedia(NARROW).matches;
+
+	function selectNet(i: number) {
+		setView(() => (netIndex = i));
+		if (isNarrow()) sidebarOpen = false;
+	}
+
 	let pen = $state<Pen>('white');
 	let axis = $state<Axis>('across');
 	let editing = $state<{ run: Run; idx: number } | null>(null);
@@ -80,6 +89,7 @@
 		pen = 'white';
 		axis = 'across';
 		editing = null;
+		sidebarOpen = !isNarrow();
 		n = size;
 	}
 
@@ -282,193 +292,224 @@
 			</form>
 		</section>
 	{:else if view}
-		<header class="bar">
-			<nav class="nets" aria-label="Cube nets">
-				{#each FAMILIES as family (family.name)}
-					<div class="family" role="group" aria-label="{family.name} family">
-						<span class="family-label" title={family.description}>{family.name}</span>
-						<div class="family-nets">
-							{#each family.nets as i (i)}
-								<button
-									class="net"
-									class:active={netIndex === i}
-									aria-pressed={netIndex === i}
-									aria-label="Net {i + 1} of {NETS.length}, {family.name} family"
-									title="Net {i + 1} ({family.name})"
-									onmousedown={keepFocus}
-									onclick={() => setView(() => (netIndex = i))}
-								>
-									<NetIcon net={NETS[i]} {transform} size={30} />
-								</button>
-							{/each}
+		<div class="workspace" class:open={sidebarOpen}>
+			<aside class="sidebar" class:open={sidebarOpen}>
+				<nav id="net-list" class="nets" aria-label="Cube nets" hidden={!sidebarOpen}>
+					{#each FAMILIES as family (family.name)}
+						<div class="family" role="group" aria-label="{family.name} family">
+							<div class="family-label">{family.name}</div>
+							<div class="family-nets">
+								{#each family.nets as i (i)}
+									<button
+										class="net"
+										class:active={netIndex === i}
+										aria-pressed={netIndex === i}
+										aria-label="Net {i + 1} of {NETS.length}, {family.name} family"
+										title="Net {i + 1} ({family.name})"
+										onmousedown={keepFocus}
+										onclick={() => selectNet(i)}
+									>
+										<NetIcon net={NETS[i]} {transform} size={72} />
+									</button>
+								{/each}
+							</div>
 						</div>
-					</div>
-				{/each}
-			</nav>
+					{/each}
+				</nav>
+			</aside>
 
-			<div class="row">
-				<div class="tools">
-					<button
-						class="pen"
-						onmousedown={keepFocus}
-						onclick={() => (pen = pen === 'white' ? 'black' : 'white')}
-						aria-label="Pen: {pen}. Press space to switch."
-						title="Switch pen (Space)"
-					>
-						<span class="swatch white" class:on={pen === 'white'}></span>
-						<span class="swatch black" class:on={pen === 'black'}></span>
-						<span class="pen-label">{pen === 'white' ? 'White pen' : 'Black pen'}</span>
-						<kbd>Space</kbd>
-					</button>
-
-					<button
-						class="chip"
-						onmousedown={keepFocus}
-						onclick={toggleDirection}
-						title="Switch typing direction (Enter while typing)"
-					>
-						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-							{#if shownAxis === 'across'}
-								<path d="M2 8h11M9.5 4.5 13 8l-3.5 3.5" />
-							{:else}
-								<path d="M8 2v11M4.5 9.5 8 13l3.5-3.5" />
-							{/if}
-						</svg>
-						{shownAxis === 'across' ? 'Across' : 'Down'}
-						<kbd>⏎</kbd>
-					</button>
-
-					<div class="group" role="group" aria-label="Turn and flip the net">
-						<button
-							class="icon"
-							onmousedown={keepFocus}
-							onclick={() => setView(() => (transform = rotateCCW(transform)))}
-							title="Rotate 90° counterclockwise"
-							aria-label="Rotate counterclockwise"
-						>
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M5.2 8.2a5.5 5.5 0 1 1 .6 5.9" />
-								<path d="M2.4 5.4l2.8 2.8 2.8-2.8" />
-							</svg>
-						</button>
-						<button
-							class="icon"
-							onmousedown={keepFocus}
-							onclick={() => setView(() => (transform = rotateCW(transform)))}
-							title="Rotate 90° clockwise"
-							aria-label="Rotate clockwise"
-						>
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M14.8 8.2a5.5 5.5 0 1 0-.6 5.9" />
-								<path d="M17.6 5.4l-2.8 2.8-2.8-2.8" />
-							</svg>
-						</button>
-						<button
-							class="icon"
-							onmousedown={keepFocus}
-							onclick={() => setView(() => (transform = flipH(transform)))}
-							title="Flip horizontally"
-							aria-label="Flip horizontally"
-						>
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M10 2.5v15" stroke-dasharray="2 2.2" />
-								<path d="M7.2 5.5 2.8 14.5h4.4z" />
-								<path d="M12.8 5.5l4.4 9h-4.4z" class="solid" />
-							</svg>
-						</button>
-						<button
-							class="icon"
-							onmousedown={keepFocus}
-							onclick={() => setView(() => (transform = flipV(transform)))}
-							title="Flip vertically"
-							aria-label="Flip vertically"
-						>
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M2.5 10h15" stroke-dasharray="2 2.2" />
-								<path d="M5.5 7.2l9-4.4v4.4z" />
-								<path d="M5.5 12.8l9 4.4v-4.4z" class="solid" />
-							</svg>
-						</button>
-					</div>
-
-					<button class="chip quiet" onclick={newGrid}>New grid</button>
-				</div>
-			</div>
-		</header>
-
-		<div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div
-				class="sheet"
-				style:width="{view.cols * cell}px"
-				style:height="{view.rows * cell}px"
-				style:cursor={cursorFor(pen)}
+			<button
+				class="handle"
+				aria-expanded={sidebarOpen}
+				aria-controls="net-list"
+				aria-label={sidebarOpen ? 'Hide nets' : 'Show nets'}
+				title={sidebarOpen ? 'Hide nets' : 'Show nets'}
 				onmousedown={keepFocus}
+				onclick={() => (sidebarOpen = !sidebarOpen)}
 			>
-				<svg
-					width={view.cols * cell}
-					height={view.rows * cell}
-					viewBox="0 0 {view.cols} {view.rows}"
-					aria-label="Crossword grid, six faces of {n} by {n}"
-					role="img"
-				>
-					{#each view.faces as face, fi (fi)}
-						{#each face.cells as rowKeys, r (r)}
-							{#each rowKeys as key, c (key)}
-								{@const sq = grid[key]}
-								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<rect
-									x={face.col + c}
-									y={face.row + r}
-									width="1"
-									height="1"
-									class="sq"
-									class:black={sq.black}
-									class:run={runSet.has(key)}
-									class:caret={key === caretKey}
-									onpointerdown={(e) => onCellDown(e, key)}
-									onpointerenter={(e) => onCellEnter(e, key)}
-									ondblclick={() => onCellDouble(key)}
-								/>
-								{#if sq.letter && !sq.black}
-									<text x={face.col + c + 0.5} y={face.row + r + 0.54}>{sq.letter}</text>
-								{/if}
-							{/each}
-						{/each}
-					{/each}
-
-					{#each view.faces as face, fi (fi)}
-						{@const x0 = face.col}
-						{@const y0 = face.row}
-						{@const x1 = face.col + n}
-						{@const y1 = face.row + n}
-						<line x1={x0} y1={y0} x2={x1} y2={y0} class={face.folds.top ? 'fold' : 'cut'} />
-						<line x1={x0} y1={y0} x2={x0} y2={y1} class={face.folds.left ? 'fold' : 'cut'} />
-						{#if !face.folds.bottom}<line x1={x0} {y1} x2={x1} y2={y1} class="cut" />{/if}
-						{#if !face.folds.right}<line {x1} y1={y0} x2={x1} y2={y1} class="cut" />{/if}
-					{/each}
-
-					{#if caretPos && caretArrow}
-						<polygon class="arrow" points={arrowPoints(caretArrow, caretPos.col, caretPos.row)} />
+				<svg viewBox="0 0 12 20" aria-hidden="true">
+					{#if sidebarOpen}
+						<path d="M7.5 6 3.5 10l4 4" />
+					{:else}
+						<path d="M4.5 6l4 4-4 4" />
 					{/if}
 				</svg>
+			</button>
 
-				<input
-					bind:this={input}
-					class="typer"
-					style:left="{(caretPos?.col ?? 0) * cell}px"
-					style:top="{(caretPos?.row ?? 0) * cell}px"
-					style:width="{cell}px"
-					style:height="{cell}px"
-					aria-label="Letters"
-					autocomplete="off"
-					autocapitalize="characters"
-					spellcheck="false"
-					tabindex={editing ? 0 : -1}
-					onkeydown={onInputKey}
-					oninput={onInput}
-					onblur={closeEditor}
-				/>
+			{#if sidebarOpen}
+				<div class="scrim" aria-hidden="true" onclick={() => (sidebarOpen = false)}></div>
+			{/if}
+
+			<div class="main">
+				<header class="bar">
+					<div class="row">
+						<div class="tools">
+							<button
+								class="pen"
+								onmousedown={keepFocus}
+								onclick={() => (pen = pen === 'white' ? 'black' : 'white')}
+								aria-label="Pen: {pen}. Press space to switch."
+								title="Switch pen (Space)"
+							>
+								<span class="swatch white" class:on={pen === 'white'}></span>
+								<span class="swatch black" class:on={pen === 'black'}></span>
+								<span class="pen-label">{pen === 'white' ? 'White pen' : 'Black pen'}</span>
+								<kbd>Space</kbd>
+							</button>
+
+							<button
+								class="chip"
+								onmousedown={keepFocus}
+								onclick={toggleDirection}
+								title="Switch typing direction (Enter while typing)"
+							>
+								<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+									{#if shownAxis === 'across'}
+										<path d="M2 8h11M9.5 4.5 13 8l-3.5 3.5" />
+									{:else}
+										<path d="M8 2v11M4.5 9.5 8 13l3.5-3.5" />
+									{/if}
+								</svg>
+								{shownAxis === 'across' ? 'Across' : 'Down'}
+								<kbd>⏎</kbd>
+							</button>
+
+							<div class="group" role="group" aria-label="Turn and flip the net">
+								<button
+									class="icon"
+									onmousedown={keepFocus}
+									onclick={() => setView(() => (transform = rotateCCW(transform)))}
+									title="Rotate 90° counterclockwise"
+									aria-label="Rotate counterclockwise"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M5.2 8.2a5.5 5.5 0 1 1 .6 5.9" />
+										<path d="M2.4 5.4l2.8 2.8 2.8-2.8" />
+									</svg>
+								</button>
+								<button
+									class="icon"
+									onmousedown={keepFocus}
+									onclick={() => setView(() => (transform = rotateCW(transform)))}
+									title="Rotate 90° clockwise"
+									aria-label="Rotate clockwise"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M14.8 8.2a5.5 5.5 0 1 0-.6 5.9" />
+										<path d="M17.6 5.4l-2.8 2.8-2.8-2.8" />
+									</svg>
+								</button>
+								<button
+									class="icon"
+									onmousedown={keepFocus}
+									onclick={() => setView(() => (transform = flipH(transform)))}
+									title="Flip horizontally"
+									aria-label="Flip horizontally"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M10 2.5v15" stroke-dasharray="2 2.2" />
+										<path d="M7.2 5.5 2.8 14.5h4.4z" />
+										<path d="M12.8 5.5l4.4 9h-4.4z" class="solid" />
+									</svg>
+								</button>
+								<button
+									class="icon"
+									onmousedown={keepFocus}
+									onclick={() => setView(() => (transform = flipV(transform)))}
+									title="Flip vertically"
+									aria-label="Flip vertically"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M2.5 10h15" stroke-dasharray="2 2.2" />
+										<path d="M5.5 7.2l9-4.4v4.4z" />
+										<path d="M5.5 12.8l9 4.4v-4.4z" class="solid" />
+									</svg>
+								</button>
+							</div>
+
+							<button class="chip quiet" onclick={newGrid}>New grid</button>
+						</div>
+					</div>
+				</header>
+
+				<div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="sheet"
+						style:width="{view.cols * cell}px"
+						style:height="{view.rows * cell}px"
+						style:cursor={cursorFor(pen)}
+						onmousedown={keepFocus}
+					>
+						<svg
+							width={view.cols * cell}
+							height={view.rows * cell}
+							viewBox="0 0 {view.cols} {view.rows}"
+							aria-label="Crossword grid, six faces of {n} by {n}"
+							role="img"
+						>
+							{#each view.faces as face, fi (fi)}
+								{#each face.cells as rowKeys, r (r)}
+									{#each rowKeys as key, c (key)}
+										{@const sq = grid[key]}
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<rect
+											x={face.col + c}
+											y={face.row + r}
+											width="1"
+											height="1"
+											class="sq"
+											class:black={sq.black}
+											class:run={runSet.has(key)}
+											class:caret={key === caretKey}
+											onpointerdown={(e) => onCellDown(e, key)}
+											onpointerenter={(e) => onCellEnter(e, key)}
+											ondblclick={() => onCellDouble(key)}
+										/>
+										{#if sq.letter && !sq.black}
+											<text x={face.col + c + 0.5} y={face.row + r + 0.54}>{sq.letter}</text>
+										{/if}
+									{/each}
+								{/each}
+							{/each}
+
+							{#each view.faces as face, fi (fi)}
+								{@const x0 = face.col}
+								{@const y0 = face.row}
+								{@const x1 = face.col + n}
+								{@const y1 = face.row + n}
+								<line x1={x0} y1={y0} x2={x1} y2={y0} class={face.folds.top ? 'fold' : 'cut'} />
+								<line x1={x0} y1={y0} x2={x0} y2={y1} class={face.folds.left ? 'fold' : 'cut'} />
+								{#if !face.folds.bottom}<line x1={x0} {y1} x2={x1} y2={y1} class="cut" />{/if}
+								{#if !face.folds.right}<line {x1} y1={y0} x2={x1} y2={y1} class="cut" />{/if}
+							{/each}
+
+							{#if caretPos && caretArrow}
+								<polygon
+									class="arrow"
+									points={arrowPoints(caretArrow, caretPos.col, caretPos.row)}
+								/>
+							{/if}
+						</svg>
+
+						<input
+							bind:this={input}
+							class="typer"
+							style:left="{(caretPos?.col ?? 0) * cell}px"
+							style:top="{(caretPos?.row ?? 0) * cell}px"
+							style:width="{cell}px"
+							style:height="{cell}px"
+							aria-label="Letters"
+							autocomplete="off"
+							autocapitalize="characters"
+							spellcheck="false"
+							tabindex={editing ? 0 : -1}
+							onkeydown={onInputKey}
+							oninput={onInput}
+							onblur={closeEditor}
+						/>
+					</div>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -631,6 +672,82 @@
 		cursor: not-allowed;
 	}
 
+	.workspace {
+		--sidebar-w: 168px;
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		position: relative;
+	}
+	.main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.sidebar {
+		flex: 0 0 auto;
+		width: 0;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		padding: 0.75rem 0;
+		background: rgb(0 0 0 / 0.2);
+		overflow: hidden;
+		transition:
+			width 180ms ease,
+			padding 180ms ease;
+	}
+	.sidebar.open {
+		width: var(--sidebar-w);
+		padding: 0.75rem;
+		border-right: 1px solid rgb(255 255 255 / 0.14);
+		overflow-x: hidden;
+		overflow-y: auto;
+		scrollbar-width: none;
+	}
+	.sidebar.open::-webkit-scrollbar {
+		display: none;
+	}
+
+	.handle {
+		position: absolute;
+		top: 50%;
+		left: 0.375rem;
+		z-index: 3;
+		transform: translateY(-50%);
+		transition: left 180ms ease;
+		width: 1.25rem;
+		height: 3rem;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 1px solid rgb(255 255 255 / 0.28);
+		border-radius: 999px;
+		background: var(--mat);
+		box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
+	}
+	.workspace.open .handle {
+		left: calc(var(--sidebar-w) - 0.625rem);
+	}
+	.handle:hover {
+		border-color: var(--rule);
+	}
+	.handle svg {
+		width: 12px;
+		height: 20px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.6;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.scrim {
+		display: none;
+	}
+
 	.bar {
 		padding: 0.75rem 1.25rem 0.25rem;
 		display: flex;
@@ -745,43 +862,42 @@
 
 	.nets {
 		display: flex;
-		justify-content: center;
-		align-items: flex-end;
-		gap: 0.9rem;
-		overflow-x: auto;
-		padding-bottom: 0.25rem;
-		scrollbar-width: thin;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.sidebar .nets {
+		flex: 0 0 auto;
+		width: calc(var(--sidebar-w) - 1.5rem);
+	}
+	.nets[hidden] {
+		display: none;
 	}
 	.family {
-		flex: 0 0 auto;
 		display: flex;
 		flex-direction: column;
-		align-items: stretch;
-		gap: 0.2rem;
+		gap: 0.4rem;
 	}
 	.family + .family {
-		padding-left: 0.9rem;
-		border-left: 1px solid rgb(255 255 255 / 0.18);
+		padding-top: 1rem;
+		border-top: 1px solid rgb(255 255 255 / 0.18);
 	}
 	.family-label {
-		font-size: 0.7rem;
+		cursor: default;
+		font-size: 0.75rem;
 		font-weight: 600;
 		letter-spacing: 0.08em;
 		font-variant-numeric: tabular-nums;
-		color: var(--on-mat-dim);
-		text-align: center;
-		padding-bottom: 0.15rem;
-		border-bottom: 1px solid rgb(255 255 255 / 0.18);
-		cursor: default;
 	}
 	.family-nets {
-		display: flex;
-		gap: 0.35rem;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.4rem;
 	}
 	.net {
 		flex: 0 0 auto;
-		width: 3.25rem;
-		height: 3rem;
+		width: 100%;
+		height: 5.5rem;
+		padding: 0;
 		display: grid;
 		place-items: center;
 		border: 1px solid transparent;
@@ -883,8 +999,23 @@
 		.bar {
 			padding: 0.75rem 0.75rem 0.25rem;
 		}
-		.nets {
-			justify-content: flex-start;
+		.sidebar {
+			position: absolute;
+			top: 0;
+			bottom: 0;
+			left: 0;
+			z-index: 2;
+			background: var(--mat);
+		}
+		.sidebar.open {
+			box-shadow: 4px 0 18px rgb(0 0 0 / 0.35);
+		}
+		.scrim {
+			display: block;
+			position: absolute;
+			inset: 0;
+			z-index: 1;
+			background: rgb(0 0 0 / 0.3);
 		}
 		.pen-label,
 		kbd {
@@ -893,7 +1024,9 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.swatch {
+		.swatch,
+		.sidebar,
+		.handle {
 			transition: none;
 		}
 	}

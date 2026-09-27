@@ -9,6 +9,7 @@
 
 	const shape = $derived(transformShape(net, transform));
 	const unit = $derived(size / Math.max(shape.rows, shape.cols));
+	const outline = $derived(shape.faces.map((f) => `M${f.col} ${f.row}h1v1h-1z`).join(''));
 </script>
 
 <svg
@@ -20,6 +21,7 @@
 	{#each shape.faces as f (f.row * 10 + f.col)}
 		<rect x={f.col} y={f.row} width="1" height="1" />
 	{/each}
+	<path d={outline} />
 </svg>
 
 <style>
@@ -29,6 +31,9 @@
 	}
 	rect {
 		fill: var(--icon-fill, transparent);
+	}
+	path {
+		fill: none;
 		stroke: var(--icon-stroke, currentColor);
 		stroke-width: 0.14;
 		stroke-linejoin: round;
