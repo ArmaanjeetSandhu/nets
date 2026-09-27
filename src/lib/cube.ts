@@ -321,9 +321,107 @@ export function runFrom(start: string, dir: Vec, isBlack: (k: string) => boolean
 	return { keys, dirs };
 }
 
-export function screenDir(v: View, key: string, d: Vec): 'right' | 'left' | 'down' | 'up' {
+export type ScreenDir = 'right' | 'left' | 'down' | 'up';
+
+export function screenDir(v: View, key: string, d: Vec): ScreenDir {
 	const a = v.axes.get(key)!;
 	const r = dot(d, a.right);
 	if (r !== 0) return r > 0 ? 'right' : 'left';
 	return dot(d, a.down) > 0 ? 'down' : 'up';
+}
+
+function rings(keys: Iterable<string>, n: number): Run[] {
+	const out: Run[] = [];
+	const seen = new Set<string>();
+	for (const key of keys) {
+		const p = parseKey(key);
+		const normalAxis = normalOf(p, n).findIndex((x) => x !== 0);
+		for (let t = 0; t < 3; t++) {
+			if (t === normalAxis) continue;
+			const fixed = 3 - t - normalAxis;
+			const id = `${fixed}:${p[fixed]}`;
+			if (seen.has(id)) continue;
+			seen.add(id);
+			const d: [number, number, number] = [0, 0, 0];
+			d[t] = 1;
+			const run: Run = { keys: [key], dirs: [d] };
+			let cur = { p, d: d as Vec };
+			for (let i = 1; i < 4 * n; i++) {
+				cur = step(cur.p, cur.d, n);
+				run.keys.push(keyOf(cur.p));
+				run.dirs.push(cur.d);
+			}
+			out.push(run);
+		}
+	}
+	return out;
+}
+
+export interface Entry {
+	number: number;
+	axis: 'across' | 'down';
+	keys: string[];
+}
+
+export interface Numbering {
+	numbers: Map<string, number>;
+	entries: Entry[];
+}
+
+const OPPOSITE: Record<ScreenDir, ScreenDir> = {
+	right: 'left',
+	left: 'right',
+	down: 'up',
+	up: 'down'
+};
+const reads = (d: ScreenDir) => d === 'right' || d === 'down';
+
+export function numberEntries(v: View, isBlack: (k: string) => boolean, n: number): Numbering {
+	const before = (a: string, b: string) => {
+		const pa = v.pos.get(a)!;
+		const pb = v.pos.get(b)!;
+		return pa.row !== pb.row ? pa.row < pb.row : pa.col < pb.col;
+	};
+
+	const found: { axis: Entry['axis']; keys: string[] }[] = [];
+	const addEntry = (ring: Run, idx: number[]) => {
+		const keys = idx.map((i) => ring.keys[i]);
+		const dirs = idx.map((i, j) => screenDir(v, keys[j], ring.dirs[i]));
+		const last = keys.length - 1;
+		const ahead = dirs.filter(reads).length * 2 - keys.length;
+		let reverse = ahead < 0;
+		if (ahead === 0) {
+			const fwd = reads(dirs[0]);
+			const rev = reads(OPPOSITE[dirs[last]]);
+			reverse = fwd === rev ? before(keys[last], keys[0]) : rev;
+		}
+		const first = reverse ? OPPOSITE[dirs[last]] : dirs[0];
+		found.push({
+			axis: first === 'left' || first === 'right' ? 'across' : 'down',
+			keys: reverse ? keys.toReversed() : keys
+		});
+	};
+
+	for (const ring of rings(v.pos.keys(), n)) {
+		const len = ring.keys.length;
+		const b = ring.keys.findIndex(isBlack);
+		if (b < 0) continue;
+		let seg: number[] = [];
+		for (let s = 1; s <= len; s++) {
+			const i = (b + s) % len;
+			if (!isBlack(ring.keys[i])) {
+				seg.push(i);
+				continue;
+			}
+			if (seg.length >= 2) addEntry(ring, seg);
+			seg = [];
+		}
+	}
+
+	const starts = [...new Set(found.map((e) => e.keys[0]))].sort((a, b) => (before(a, b) ? -1 : 1));
+	const numbers = new Map(starts.map((k, i) => [k, i + 1]));
+	const entries = found
+		.map((e) => ({ number: numbers.get(e.keys[0])!, ...e }))
+		.sort((a, b) => a.number - b.number || (a.axis === 'across' ? -1 : 1));
+	return { numbers, entries };
 }

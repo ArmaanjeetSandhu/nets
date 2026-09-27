@@ -9,6 +9,7 @@
 		buildView,
 		flipH,
 		flipV,
+		numberEntries,
 		rotateCCW,
 		rotateCW,
 		runFrom,
@@ -32,6 +33,13 @@
 	let netIndex = $state(0);
 	let transform = $state<Transform>(IDENTITY);
 	const view = $derived(n === null ? null : buildView(netIndex, transform, n));
+
+	const complete = $derived(
+		n !== null && Object.values(grid).every((sq) => sq.black || sq.letter !== '')
+	);
+	const numbering = $derived(
+		complete && view && n !== null ? numberEntries(view, (k) => grid[k].black, n) : null
+	);
 
 	let sidebarOpen = $state(true);
 	const NARROW = '(max-width: 640px)';
@@ -452,6 +460,7 @@
 								{#each face.cells as rowKeys, r (r)}
 									{#each rowKeys as key, c (key)}
 										{@const sq = grid[key]}
+										{@const num = numbering?.numbers.get(key)}
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<rect
 											x={face.col + c}
@@ -467,7 +476,12 @@
 											ondblclick={() => onCellDouble(key)}
 										/>
 										{#if sq.letter && !sq.black}
-											<text x={face.col + c + 0.5} y={face.row + r + 0.54}>{sq.letter}</text>
+											<text x={face.col + c + 0.5} y={face.row + r + (num ? 0.6 : 0.54)}
+												>{sq.letter}</text
+											>
+										{/if}
+										{#if num}
+											<text class="num" x={face.col + c + 0.06} y={face.row + r + 0.05}>{num}</text>
 										{/if}
 									{/each}
 								{/each}
@@ -960,6 +974,12 @@
 		text-anchor: middle;
 		dominant-baseline: central;
 		pointer-events: none;
+	}
+	text.num {
+		font-size: 0.27px;
+		font-weight: 500;
+		text-anchor: start;
+		dominant-baseline: hanging;
 	}
 
 	line {
