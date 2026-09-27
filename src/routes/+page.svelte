@@ -41,6 +41,28 @@
 		complete && view && n !== null ? numberEntries(view, (k) => grid[k].black, n) : null
 	);
 
+	type ClueRow = { id: string; number: number; word: string; keys: string[] };
+
+	let clues = $state<Record<string, string>>({});
+	let activeClue = $state<string | null>(null);
+
+	const clueLists = $derived.by(() => {
+		const lists: Record<Axis, ClueRow[]> = { across: [], down: [] };
+		for (const e of numbering?.entries ?? []) {
+			lists[e.axis].push({
+				id: `${e.axis}:${e.keys.join('|')}`,
+				number: e.number,
+				word: e.keys.map((k) => grid[k].letter).join(''),
+				keys: e.keys
+			});
+		}
+		return lists;
+	});
+	const clueSet = $derived(
+		new Set([...clueLists.across, ...clueLists.down].find((c) => c.id === activeClue)?.keys ?? [])
+	);
+	const clueText = (c: ClueRow) => clues[c.id] ?? `Clue for ${c.word}`;
+
 	let sidebarOpen = $state(true);
 	const NARROW = '(max-width: 640px)';
 	const isNarrow = () => typeof matchMedia === 'function' && matchMedia(NARROW).matches;
@@ -56,15 +78,26 @@
 	let painting = false;
 	let lastPaint = { key: '', time: 0 };
 
+	let winW = $state(1200);
+	const narrow = $derived(winW <= 640);
+	const PANEL_GAP = 24;
+
 	let stageW = $state(800);
 	let stageH = $state(600);
 	let input = $state<HTMLInputElement>();
 
 	const cell = $derived.by(() => {
 		if (!view) return 32;
-		const fit = Math.min((stageW - 48) / view.cols, (stageH - 48) / view.rows);
+		const side = numbering && !narrow ? panelW + PANEL_GAP : 0;
+		const below = numbering && narrow ? panelH + PANEL_GAP : 0;
+		const fit = Math.min((stageW - 48 - side) / view.cols, (stageH - 48 - below) / view.rows);
 		return Math.max(12, Math.min(64, Math.floor(fit)));
 	});
+
+	const panelW = $derived(
+		narrow ? Math.max(0, stageW - 48) : Math.round(Math.min(384, Math.max(256, stageW * 0.3)))
+	);
+	const panelH = $derived(narrow ? Math.round(stageH * 0.4) : view ? view.rows * cell : 0);
 
 	const runSet = $derived(new Set(editing?.run.keys ?? []));
 	const caretKey = $derived(editing ? editing.run.keys[editing.idx] : null);
@@ -92,6 +125,8 @@
 		const fresh: Record<string, Square> = {};
 		for (const k of allKeys(size)) fresh[k] = { black: false, letter: '' };
 		grid = fresh;
+		clues = {};
+		activeClue = null;
 		netIndex = 0;
 		transform = IDENTITY;
 		pen = 'white';
@@ -102,7 +137,8 @@
 	}
 
 	function newGrid() {
-		const used = Object.values(grid).some((s) => s.black || s.letter);
+		const used =
+			Object.values(grid).some((s) => s.black || s.letter) || Object.keys(clues).length > 0;
 		if (used && !confirm('Start a new grid? This clears the current puzzle.')) return;
 		editing = null;
 		sizeInput = n ?? 5;
@@ -217,7 +253,7 @@
 	function onWindowKey(e: KeyboardEvent) {
 		if (n === null || e.code !== 'Space') return;
 		const t = e.target as HTMLElement | null;
-		if (t instanceof HTMLInputElement && t !== input) return;
+		if ((t instanceof HTMLInputElement && t !== input) || t instanceof HTMLTextAreaElement) return;
 		e.preventDefault();
 		pen = pen === 'white' ? 'black' : 'white';
 	}
@@ -261,7 +297,11 @@
 	<title>Nets</title>
 </svelte:head>
 
-<svelte:window onkeydown={onWindowKey} onpointerup={() => (painting = false)} />
+<svelte:window
+	bind:innerWidth={winW}
+	onkeydown={onWindowKey}
+	onpointerup={() => (painting = false)}
+/>
 
 <main class="mat">
 	{#if n === null}
@@ -441,87 +481,135 @@
 				</header>
 
 				<div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
-						class="sheet"
-						style:width="{view.cols * cell}px"
-						style:height="{view.rows * cell}px"
-						style:cursor={cursorFor(pen)}
-						onmousedown={keepFocus}
-					>
-						<svg
-							width={view.cols * cell}
-							height={view.rows * cell}
-							viewBox="0 0 {view.cols} {view.rows}"
-							aria-label="Crossword grid, six faces of {n} by {n}"
-							role="img"
+					<div class="layout" class:narrow>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="sheet"
+							style:width="{view.cols * cell}px"
+							style:height="{view.rows * cell}px"
+							style:cursor={cursorFor(pen)}
+							onmousedown={keepFocus}
 						>
-							{#each view.faces as face, fi (fi)}
-								{#each face.cells as rowKeys, r (r)}
-									{#each rowKeys as key, c (key)}
-										{@const sq = grid[key]}
-										{@const num = numbering?.numbers.get(key)}
-										<!-- svelte-ignore a11y_no_static_element_interactions -->
-										<rect
-											x={face.col + c}
-											y={face.row + r}
-											width="1"
-											height="1"
-											class="sq"
-											class:black={sq.black}
-											class:run={runSet.has(key)}
-											class:caret={key === caretKey}
-											onpointerdown={(e) => onCellDown(e, key)}
-											onpointerenter={(e) => onCellEnter(e, key)}
-											ondblclick={() => onCellDouble(key)}
-										/>
-										{#if sq.letter && !sq.black}
-											<text x={face.col + c + 0.5} y={face.row + r + (num ? 0.6 : 0.54)}
-												>{sq.letter}</text
-											>
-										{/if}
-										{#if num}
-											<text class="num" x={face.col + c + 0.06} y={face.row + r + 0.05}>{num}</text>
-										{/if}
+							<svg
+								width={view.cols * cell}
+								height={view.rows * cell}
+								viewBox="0 0 {view.cols} {view.rows}"
+								aria-label="Crossword grid, six faces of {n} by {n}"
+								role="img"
+							>
+								{#each view.faces as face, fi (fi)}
+									{#each face.cells as rowKeys, r (r)}
+										{#each rowKeys as key, c (key)}
+											{@const sq = grid[key]}
+											{@const num = numbering?.numbers.get(key)}
+											<!-- svelte-ignore a11y_no_static_element_interactions -->
+											<rect
+												x={face.col + c}
+												y={face.row + r}
+												width="1"
+												height="1"
+												class="sq"
+												class:black={sq.black}
+												class:run={runSet.has(key) || clueSet.has(key)}
+												class:caret={key === caretKey}
+												onpointerdown={(e) => onCellDown(e, key)}
+												onpointerenter={(e) => onCellEnter(e, key)}
+												ondblclick={() => onCellDouble(key)}
+											/>
+											{#if sq.letter && !sq.black}
+												<text x={face.col + c + 0.5} y={face.row + r + (num ? 0.6 : 0.54)}
+													>{sq.letter}</text
+												>
+											{/if}
+											{#if num}
+												<text class="num" x={face.col + c + 0.06} y={face.row + r + 0.05}
+													>{num}</text
+												>
+											{/if}
+										{/each}
 									{/each}
 								{/each}
-							{/each}
 
-							{#each view.faces as face, fi (fi)}
-								{@const x0 = face.col}
-								{@const y0 = face.row}
-								{@const x1 = face.col + n}
-								{@const y1 = face.row + n}
-								<line x1={x0} y1={y0} x2={x1} y2={y0} class={face.folds.top ? 'fold' : 'cut'} />
-								<line x1={x0} y1={y0} x2={x0} y2={y1} class={face.folds.left ? 'fold' : 'cut'} />
-								{#if !face.folds.bottom}<line x1={x0} {y1} x2={x1} y2={y1} class="cut" />{/if}
-								{#if !face.folds.right}<line {x1} y1={y0} x2={x1} y2={y1} class="cut" />{/if}
-							{/each}
+								{#each view.faces as face, fi (fi)}
+									{@const x0 = face.col}
+									{@const y0 = face.row}
+									{@const x1 = face.col + n}
+									{@const y1 = face.row + n}
+									<line x1={x0} y1={y0} x2={x1} y2={y0} class={face.folds.top ? 'fold' : 'cut'} />
+									<line x1={x0} y1={y0} x2={x0} y2={y1} class={face.folds.left ? 'fold' : 'cut'} />
+									{#if !face.folds.bottom}<line x1={x0} {y1} x2={x1} y2={y1} class="cut" />{/if}
+									{#if !face.folds.right}<line {x1} y1={y0} x2={x1} y2={y1} class="cut" />{/if}
+								{/each}
 
-							{#if caretPos && caretArrow}
-								<polygon
-									class="arrow"
-									points={arrowPoints(caretArrow, caretPos.col, caretPos.row)}
-								/>
-							{/if}
-						</svg>
+								{#if caretPos && caretArrow}
+									<polygon
+										class="arrow"
+										points={arrowPoints(caretArrow, caretPos.col, caretPos.row)}
+									/>
+								{/if}
+							</svg>
 
-						<input
-							bind:this={input}
-							class="typer"
-							style:left="{(caretPos?.col ?? 0) * cell}px"
-							style:top="{(caretPos?.row ?? 0) * cell}px"
-							style:width="{cell}px"
-							style:height="{cell}px"
-							aria-label="Letters"
-							autocomplete="off"
-							autocapitalize="characters"
-							spellcheck="false"
-							tabindex={editing ? 0 : -1}
-							onkeydown={onInputKey}
-							oninput={onInput}
-							onblur={closeEditor}
-						/>
+							<input
+								bind:this={input}
+								class="typer"
+								style:left="{(caretPos?.col ?? 0) * cell}px"
+								style:top="{(caretPos?.row ?? 0) * cell}px"
+								style:width="{cell}px"
+								style:height="{cell}px"
+								aria-label="Letters"
+								autocomplete="off"
+								autocapitalize="characters"
+								spellcheck="false"
+								tabindex={editing ? 0 : -1}
+								onkeydown={onInputKey}
+								oninput={onInput}
+								onblur={closeEditor}
+							/>
+						</div>
+
+						{#if numbering}
+							<aside
+								class="clues"
+								aria-label="Clues"
+								style:width="{panelW}px"
+								style:height="{panelH}px"
+							>
+								{#each [['across', 'Across'], ['down', 'Down']] as const as [ax, title] (ax)}
+									<section class="clue-col">
+										<h2>{title}</h2>
+										{#if clueLists[ax].length === 0}
+											<p class="empty">No {ax} entries.</p>
+										{:else}
+											<ol>
+												{#each clueLists[ax] as c (c.id)}
+													<li class:active={activeClue === c.id}>
+														<label for="clue-{c.id}" class="clue-num">{c.number}</label>
+														<textarea
+															id="clue-{c.id}"
+															rows="1"
+															value={clueText(c)}
+															aria-label="{c.number} {title}, {c.word}"
+															spellcheck="true"
+															oninput={(e) => (clues[c.id] = e.currentTarget.value)}
+															onfocus={() => (activeClue = c.id)}
+															onblur={() => {
+																if (activeClue === c.id) activeClue = null;
+															}}
+															onkeydown={(e) => {
+																if (e.key === 'Enter' || e.key === 'Escape') {
+																	e.preventDefault();
+																	e.currentTarget.blur();
+																}
+															}}></textarea>
+														<span class="answer">{c.word} ({c.word.length})</span>
+													</li>
+												{/each}
+											</ol>
+										{/if}
+									</section>
+								{/each}
+							</aside>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -928,6 +1016,105 @@
 		border-color: var(--rule);
 		--icon-fill: var(--paper);
 		--icon-stroke: var(--mat);
+	}
+
+	.layout {
+		display: flex;
+		align-items: flex-start;
+		gap: 24px;
+	}
+	.layout.narrow {
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.clues {
+		flex: 0 0 auto;
+		box-sizing: border-box;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		align-content: start;
+		gap: 1rem;
+		padding: 0.75rem 1rem 1rem;
+		overflow-y: auto;
+		background: rgb(0 0 0 / 0.2);
+		border: 1px solid rgb(255 255 255 / 0.14);
+	}
+	.clue-col {
+		min-width: 0;
+	}
+	.clues h2 {
+		margin: 0 0 0.5rem;
+		padding-bottom: 0.35rem;
+		border-bottom: 1px solid rgb(255 255 255 / 0.18);
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.clues ol {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.clues li {
+		display: grid;
+		grid-template-columns: 1.6rem 1fr;
+		column-gap: 0.25rem;
+		align-items: baseline;
+		padding: 0.25rem 0.3rem;
+		border-radius: 4px;
+		border: 1px solid transparent;
+	}
+	.clues li.active {
+		background: rgb(0 0 0 / 0.22);
+		border-color: var(--rule);
+	}
+	.clue-num {
+		font-weight: 700;
+		font-size: 0.85rem;
+		font-variant-numeric: tabular-nums;
+		text-align: right;
+		padding-right: 0.2rem;
+	}
+	.clues textarea {
+		min-width: 0;
+		width: 100%;
+		box-sizing: border-box;
+		resize: none;
+		field-sizing: content;
+		font: inherit;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		color: inherit;
+		background: transparent;
+		border: 0;
+		border-bottom: 1px dashed rgb(255 255 255 / 0.3);
+		border-radius: 0;
+		padding: 0.1rem 0;
+		overflow: hidden;
+	}
+	.clues textarea:hover {
+		border-bottom-color: rgb(255 255 255 / 0.6);
+	}
+	.clues textarea:focus-visible {
+		outline: none;
+		border-bottom: 1px solid var(--rule);
+	}
+	.answer {
+		grid-column: 2;
+		font-size: 0.7rem;
+		letter-spacing: 0.06em;
+		color: var(--on-mat-dim);
+		overflow-wrap: anywhere;
+	}
+	.empty {
+		margin: 0;
+		font-size: 0.8rem;
+		color: var(--on-mat-dim);
 	}
 
 	.stage {
