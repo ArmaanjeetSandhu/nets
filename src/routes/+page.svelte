@@ -22,8 +22,8 @@
 	type Axis = 'across' | 'down';
 	type Pen = 'white' | 'black';
 
-	const MIN_N = 1;
-	const MAX_N = 15;
+	const MIN_N = 2;
+	const MAX_N = 6;
 
 	let sizeInput = $state(5);
 	let n = $state<number | null>(null);
@@ -45,6 +45,7 @@
 
 	let clues = $state<Record<string, string>>({});
 	let activeClue = $state<string | null>(null);
+	let title = $state('');
 
 	const clueLists = $derived.by(() => {
 		const lists: Record<Axis, ClueRow[]> = { across: [], down: [] };
@@ -62,6 +63,56 @@
 		new Set([...clueLists.across, ...clueLists.down].find((c) => c.id === activeClue)?.keys ?? [])
 	);
 	const clueText = (c: ClueRow) => clues[c.id] ?? `Clue for ${c.word}`;
+
+	function fileName(t: string) {
+		const safe = t
+			// eslint-disable-next-line no-control-regex
+			.replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, '')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.replace(/[. ]+$/, '');
+		return `${safe || 'crossword'}.json`;
+	}
+
+	function download() {
+		if (!numbering || n === null) return;
+		const puzzleTitle = title.trim();
+		const written: Record<string, string> = {};
+		const entries = numbering.entries.map((e) => {
+			const id = `${e.axis}:${e.keys.join('|')}`;
+			const clue = clues[id];
+			if (clue !== undefined) written[id] = clue;
+			return {
+				id,
+				number: e.number,
+				axis: e.axis,
+				cells: e.keys,
+				answer: e.keys.map((k) => grid[k].letter).join(''),
+				...(clue !== undefined && { clue })
+			};
+		});
+		const puzzle = {
+			format: 'nets-crossword',
+			version: 1,
+			...(puzzleTitle && { title: puzzleTitle }),
+			size: n,
+			grid: $state.snapshot(grid),
+			clues: written,
+			layout: { netIndex, transform: [...transform] },
+			entries
+		};
+		const blob = new Blob([JSON.stringify(puzzle, null, 2) + '\n'], {
+			type: 'application/json'
+		});
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = fileName(puzzleTitle);
+		document.body.append(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
+	}
 
 	let sidebarOpen = $state(true);
 	const NARROW = '(max-width: 640px)';
@@ -127,6 +178,7 @@
 		grid = fresh;
 		clues = {};
 		activeClue = null;
+		title = '';
 		netIndex = 0;
 		transform = IDENTITY;
 		pen = 'white';
@@ -138,7 +190,9 @@
 
 	function newGrid() {
 		const used =
-			Object.values(grid).some((s) => s.black || s.letter) || Object.keys(clues).length > 0;
+			Object.values(grid).some((s) => s.black || s.letter) ||
+			Object.keys(clues).length > 0 ||
+			title.trim() !== '';
 		if (used && !confirm('Start a new grid? This clears the current puzzle.')) return;
 		editing = null;
 		sizeInput = n ?? 5;
@@ -392,6 +446,8 @@
 				<header class="bar">
 					<div class="row">
 						<div class="tools">
+							<button class="chip quiet" onclick={newGrid}>New grid</button>
+
 							<button
 								class="pen"
 								onmousedown={keepFocus}
@@ -475,7 +531,19 @@
 								</button>
 							</div>
 
-							<button class="chip quiet" onclick={newGrid}>New grid</button>
+							{#if numbering}
+								<button
+									class="chip"
+									onmousedown={keepFocus}
+									onclick={download}
+									title="Download the puzzle as JSON"
+								>
+									<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+										<path d="M8 2v8.5M4.5 7 8 10.5 11.5 7M2.5 13.5h11" />
+									</svg>
+									Download
+								</button>
+							{/if}
 						</div>
 					</div>
 				</header>
@@ -574,6 +642,22 @@
 								style:width="{panelW}px"
 								style:height="{panelH}px"
 							>
+								<div class="title-field">
+									<input
+										id="puzzle-title"
+										type="text"
+										placeholder="Untitled puzzle"
+										autocomplete="off"
+										spellcheck="true"
+										bind:value={title}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === 'Escape') {
+												e.preventDefault();
+												e.currentTarget.blur();
+											}
+										}}
+									/>
+								</div>
 								{#each [['across', 'Across'], ['down', 'Down']] as const as [ax, title] (ax)}
 									<section class="clue-col">
 										<h2>{title}</h2>
@@ -1042,6 +1126,36 @@
 	}
 	.clue-col {
 		min-width: 0;
+	}
+	.title-field {
+		grid-column: 1 / -1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+	.title-field input {
+		min-width: 0;
+		box-sizing: border-box;
+		font: inherit;
+		font-size: 1rem;
+		font-weight: 600;
+		color: inherit;
+		background: transparent;
+		border: 0;
+		border-bottom: 1px dashed rgb(255 255 255 / 0.3);
+		border-radius: 0;
+		padding: 0.2rem 0;
+	}
+	.title-field input::placeholder {
+		color: var(--on-mat-dim);
+		font-weight: 500;
+	}
+	.title-field input:hover {
+		border-bottom-color: rgb(255 255 255 / 0.6);
+	}
+	.title-field input:focus-visible {
+		outline: none;
+		border-bottom: 1px solid var(--rule);
 	}
 	.clues h2 {
 		margin: 0 0 0.5rem;
