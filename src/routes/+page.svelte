@@ -68,9 +68,10 @@
 		const safe = t
 			// eslint-disable-next-line no-control-regex
 			.replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, '')
-			.replace(/\s+/g, ' ')
 			.trim()
-			.replace(/[. ]+$/, '');
+			.replace(/[.\s]+$/, '')
+			.replace(/\s+/g, '_')
+			.toLowerCase();
 		return `${safe || 'crossword'}.json`;
 	}
 
@@ -186,6 +187,92 @@
 		editing = null;
 		sidebarOpen = !isNarrow();
 		n = size;
+	}
+
+	let importError = $state('');
+	let importInput = $state<HTMLInputElement>();
+
+	const TRANSFORMS: Transform[] = (() => {
+		const out: Transform[] = [];
+		let m = IDENTITY;
+		for (let i = 0; i < 4; i++) {
+			out.push(m, flipH(m));
+			m = rotateCW(m);
+		}
+		return out;
+	})();
+
+	function parsePuzzle(data: unknown) {
+		if (typeof data !== 'object' || data === null) throw new Error('That file isn’t a puzzle.');
+		const d = data as Record<string, unknown>;
+		if (d.format !== 'nets-crossword') throw new Error('That file isn’t a Nets puzzle.');
+		const size = d.size;
+		if (typeof size !== 'number' || !Number.isInteger(size) || size < MIN_N || size > MAX_N)
+			throw new Error(`Face size must be between ${MIN_N} and ${MAX_N}.`);
+		if (typeof d.grid !== 'object' || d.grid === null) throw new Error('The grid is missing.');
+		const src = d.grid as Record<string, unknown>;
+		const fresh: Record<string, Square> = {};
+		for (const k of allKeys(size)) {
+			const sq = src[k] as Record<string, unknown> | undefined;
+			if (typeof sq !== 'object' || sq === null) throw new Error('The grid is incomplete.');
+			const black = sq.black === true;
+			const letter = typeof sq.letter === 'string' ? sq.letter.trim().toLocaleUpperCase() : '';
+			fresh[k] = { black, letter: black ? '' : letter };
+		}
+		const importedClues: Record<string, string> = {};
+		if (typeof d.clues === 'object' && d.clues !== null)
+			for (const [id, v] of Object.entries(d.clues))
+				if (typeof v === 'string') importedClues[id] = v;
+		let idx = 0;
+		let tf: Transform = IDENTITY;
+		const layout = d.layout as Record<string, unknown> | undefined;
+		if (typeof layout === 'object' && layout !== null) {
+			const ni = layout.netIndex;
+			if (typeof ni === 'number' && Number.isInteger(ni) && ni >= 0 && ni < NETS.length) idx = ni;
+			const t = layout.transform;
+			if (Array.isArray(t)) tf = TRANSFORMS.find((m) => m.every((v, i) => v === t[i])) ?? IDENTITY;
+		}
+		const puzzleTitle = typeof d.title === 'string' ? d.title : '';
+		return {
+			size,
+			grid: fresh,
+			clues: importedClues,
+			netIndex: idx,
+			transform: tf,
+			title: puzzleTitle
+		};
+	}
+
+	async function importFile(e: Event) {
+		const el = e.currentTarget as HTMLInputElement;
+		const file = el.files?.[0];
+		el.value = '';
+		if (!file) return;
+		importError = '';
+		let p: ReturnType<typeof parsePuzzle>;
+		try {
+			p = parsePuzzle(JSON.parse(await file.text()));
+		} catch (err) {
+			importError =
+				err instanceof SyntaxError
+					? 'That file isn’t valid JSON.'
+					: err instanceof Error
+						? err.message
+						: 'Couldn’t read that file.';
+			return;
+		}
+		grid = p.grid;
+		clues = p.clues;
+		activeClue = null;
+		title = p.title;
+		netIndex = p.netIndex;
+		transform = p.transform;
+		pen = 'white';
+		axis = 'across';
+		editing = null;
+		sidebarOpen = !isNarrow();
+		sizeInput = p.size;
+		n = p.size;
 	}
 
 	function newGrid() {
@@ -389,8 +476,22 @@
 					class="primary"
 					disabled={!(sizeInput >= MIN_N && sizeInput <= MAX_N)}
 				>
-					Make the grid
+					Create
 				</button>
+				<div class="or" aria-hidden="true">or</div>
+				<button type="button" class="secondary" onclick={() => importInput?.click()}>
+					Import JSON
+				</button>
+				<input
+					bind:this={importInput}
+					type="file"
+					accept=".json,application/json"
+					hidden
+					onchange={importFile}
+				/>
+				{#if importError}
+					<p class="import-error" role="alert">{importError}</p>
+				{/if}
 			</form>
 		</section>
 	{:else if view}
@@ -853,6 +954,29 @@
 	.primary:hover {
 		background: #000;
 	}
+	.or {
+		margin: 0.6rem 0;
+		text-align: center;
+		font-size: 0.8rem;
+		color: #6b706d;
+	}
+	.secondary {
+		width: 100%;
+		padding: 0.6rem 1rem;
+		border: 2px solid var(--ink);
+		background: var(--paper);
+		color: var(--ink);
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+	.secondary:hover {
+		background: #f1f1ee;
+	}
+	.setup .import-error {
+		margin: 0.75rem 0 0;
+		font-size: 0.85rem;
+		color: #b3261e;
+	}
 	.primary:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
@@ -1121,8 +1245,12 @@
 		gap: 1rem;
 		padding: 0.75rem 1rem 1rem;
 		overflow-y: auto;
+		scrollbar-width: none;
 		background: rgb(0 0 0 / 0.2);
 		border: 1px solid rgb(255 255 255 / 0.14);
+	}
+	.clues::-webkit-scrollbar {
+		display: none;
 	}
 	.clue-col {
 		min-width: 0;
