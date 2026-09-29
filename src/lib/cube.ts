@@ -283,7 +283,7 @@ export function allKeys(n: number): string[] {
 	return [...buildView(0, IDENTITY, n).pos.keys()];
 }
 
-function normalOf(p: Vec, n: number): Vec {
+export function normalOf(p: Vec, n: number): Vec {
 	for (let i = 0; i < 3; i++) {
 		if (p[i] === 0 || p[i] === 2 * n) {
 			const v: [number, number, number] = [0, 0, 0];

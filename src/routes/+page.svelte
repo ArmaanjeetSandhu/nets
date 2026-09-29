@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import NetIcon from '$lib/NetIcon.svelte';
+	import { edgeBars } from '$lib/edges';
 	import {
 		NETS,
 		FAMILIES,
@@ -115,6 +116,39 @@
 		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
 
+	type ViewMode = 'net' | 'cube';
+	let viewMode = $state<ViewMode>('net');
+	let cubeMounted = $state(false);
+	let netHidden = $state(false);
+	let sheet = $state<HTMLDivElement>();
+	let cubeModule = $state.raw<Promise<typeof import('$lib/CubeView.svelte')>>();
+	const loadCube = () => (cubeModule ??= import('$lib/CubeView.svelte'));
+
+	function showCube() {
+		if (viewMode === 'cube') return;
+		input?.blur();
+		editing = null;
+		loadCube();
+		viewMode = 'cube';
+		cubeMounted = true;
+	}
+
+	function showNet() {
+		viewMode = 'net';
+	}
+
+	function cubeSettled() {
+		if (viewMode !== 'net') return;
+		netHidden = false;
+		cubeMounted = false;
+	}
+
+	function resetCube() {
+		viewMode = 'net';
+		netHidden = false;
+		cubeMounted = false;
+	}
+
 	let sidebarOpen = $state(true);
 	const NARROW = '(max-width: 640px)';
 	const isNarrow = () => typeof matchMedia === 'function' && matchMedia(NARROW).matches;
@@ -138,12 +172,69 @@
 	let stageH = $state(600);
 	let input = $state<HTMLInputElement>();
 
-	const cell = $derived.by(() => {
-		if (!view) return 32;
+	let dpr = $state(1);
+	$effect(() => {
+		let mq: MediaQueryList | undefined;
+		const update = () => {
+			mq?.removeEventListener('change', update);
+			dpr = window.devicePixelRatio || 1;
+			mq = matchMedia(`(resolution: ${dpr}dppx)`);
+			mq.addEventListener('change', update);
+		};
+		update();
+		return () => mq?.removeEventListener('change', update);
+	});
+
+	const cellDev = $derived.by(() => {
+		if (!view) return Math.round(32 * dpr);
 		const side = numbering && !narrow ? panelW + PANEL_GAP : 0;
 		const below = numbering && narrow ? panelH + PANEL_GAP : 0;
 		const fit = Math.min((stageW - 48 - side) / view.cols, (stageH - 48 - below) / view.rows);
-		return Math.max(12, Math.min(64, Math.floor(fit)));
+		return Math.max(Math.round(12 * dpr), Math.min(Math.round(64 * dpr), Math.floor(fit * dpr)));
+	});
+	const cell = $derived(cellDev / dpr);
+
+	const edgesPath = $derived.by(() => {
+		if (!view || n === null) return '';
+		const k = 1 / cellDev;
+		let d = '';
+		for (const face of view.faces)
+			for (const b of edgeBars(face.folds, n, cellDev, dpr, false))
+				d += `M${face.col + b.x * k} ${face.row + b.y * k}h${b.w * k}v${b.h * k}h${-b.w * k}z`;
+		return d;
+	});
+
+	let shift = $state({ x: 0, y: 0 });
+	function alignSheet() {
+		const svg = sheet?.querySelector('svg');
+		if (!svg) return;
+		const r = svg.getBoundingClientRect();
+		const snap = (v: number) => {
+			const origin = Math.round(v) * dpr;
+			return (Math.round(origin) - origin) / dpr;
+		};
+		const x = snap(r.left);
+		const y = snap(r.top);
+		if (Math.abs(x - shift.x) > 1e-3 || Math.abs(y - shift.y) > 1e-3) shift = { x, y };
+	}
+	let layoutEl = $state<HTMLDivElement>();
+	$effect(() => {
+		void [cellDev, dpr, view, numbering, sidebarOpen, winW];
+		const els = [layoutEl, sheet].filter((e): e is HTMLDivElement => !!e);
+		if (!els.length) return;
+		let frame = 0;
+		const queue = () => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(alignSheet);
+		};
+		const ro = new ResizeObserver(queue);
+		for (const e of els) ro.observe(e);
+		if (layoutEl?.parentElement) ro.observe(layoutEl.parentElement);
+		queue();
+		return () => {
+			cancelAnimationFrame(frame);
+			ro.disconnect();
+		};
 	});
 
 	const panelW = $derived(
@@ -185,6 +276,7 @@
 		pen = 'white';
 		axis = 'across';
 		editing = null;
+		resetCube();
 		sidebarOpen = !isNarrow();
 		n = size;
 	}
@@ -270,6 +362,7 @@
 		pen = 'white';
 		axis = 'across';
 		editing = null;
+		resetCube();
 		sidebarOpen = !isNarrow();
 		sizeInput = p.size;
 		n = p.size;
@@ -282,6 +375,7 @@
 			title.trim() !== '';
 		if (used && !confirm('Start a new grid? This clears the current puzzle.')) return;
 		editing = null;
+		resetCube();
 		sizeInput = n ?? 5;
 		n = null;
 	}
@@ -392,7 +486,7 @@
 	}
 
 	function onWindowKey(e: KeyboardEvent) {
-		if (n === null || e.code !== 'Space') return;
+		if (n === null || viewMode === 'cube' || e.code !== 'Space') return;
 		const t = e.target as HTMLElement | null;
 		if ((t instanceof HTMLInputElement && t !== input) || t instanceof HTMLTextAreaElement) return;
 		e.preventDefault();
@@ -549,8 +643,42 @@
 						<div class="tools">
 							<button class="chip quiet" onclick={newGrid}>New grid</button>
 
+							<div class="group" role="group" aria-label="View">
+								<button
+									class="seg"
+									class:on={viewMode === 'net'}
+									aria-pressed={viewMode === 'net'}
+									onmousedown={keepFocus}
+									onclick={showNet}
+									title="Show the flat net"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M8 2h4v4h4v4h-4v8H8v-8H4V6h4z" />
+										<path d="M8 6h4M8 10h4M8 14h4" class="crease" />
+									</svg>
+									Net
+								</button>
+								<button
+									class="seg"
+									class:on={viewMode === 'cube'}
+									aria-pressed={viewMode === 'cube'}
+									onmousedown={keepFocus}
+									onpointerenter={loadCube}
+									onfocus={loadCube}
+									onclick={showCube}
+									title="Fold the net into a cube"
+								>
+									<svg viewBox="0 0 20 20" aria-hidden="true">
+										<path d="M10 2.5l6.5 3.75v7.5L10 17.5l-6.5-3.75v-7.5z" />
+										<path d="M3.5 6.25 10 10l6.5-3.75M10 10v7.5" />
+									</svg>
+									Cube
+								</button>
+							</div>
+
 							<button
 								class="pen"
+								disabled={viewMode === 'cube'}
 								onmousedown={keepFocus}
 								onclick={() => (pen = pen === 'white' ? 'black' : 'white')}
 								aria-label="Pen: {pen}. Press space to switch."
@@ -564,6 +692,7 @@
 
 							<button
 								class="chip"
+								disabled={viewMode === 'cube'}
 								onmousedown={keepFocus}
 								onclick={toggleDirection}
 								title="Switch typing direction (Enter while typing)"
@@ -650,19 +779,28 @@
 				</header>
 
 				<div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
-					<div class="layout" class:narrow>
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="layout" class:narrow bind:this={layoutEl}>
+						<!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
 						<div
+							bind:this={sheet}
 							class="sheet"
+							class:cube={viewMode === 'cube'}
 							style:width="{view.cols * cell}px"
 							style:height="{view.rows * cell}px"
-							style:cursor={cursorFor(pen)}
+							style:cursor={viewMode === 'cube' ? null : cursorFor(pen)}
+							role={viewMode === 'cube' ? 'application' : undefined}
+							aria-label={viewMode === 'cube'
+								? 'The puzzle folded into a cube. Drag or use the arrow keys to turn it.'
+								: undefined}
+							tabindex={viewMode === 'cube' ? 0 : undefined}
 							onmousedown={keepFocus}
 						>
 							<svg
+								class:away={netHidden}
+								aria-hidden={netHidden}
 								width={view.cols * cell}
 								height={view.rows * cell}
-								viewBox="0 0 {view.cols} {view.rows}"
+								viewBox="{-shift.x / cell} {-shift.y / cell} {view.cols} {view.rows}"
 								aria-label="Crossword grid, six faces of {n} by {n}"
 								role="img"
 							>
@@ -699,16 +837,7 @@
 									{/each}
 								{/each}
 
-								{#each view.faces as face, fi (fi)}
-									{@const x0 = face.col}
-									{@const y0 = face.row}
-									{@const x1 = face.col + n}
-									{@const y1 = face.row + n}
-									<line x1={x0} y1={y0} x2={x1} y2={y0} class={face.folds.top ? 'fold' : 'cut'} />
-									<line x1={x0} y1={y0} x2={x0} y2={y1} class={face.folds.left ? 'fold' : 'cut'} />
-									{#if !face.folds.bottom}<line x1={x0} {y1} x2={x1} y2={y1} class="cut" />{/if}
-									{#if !face.folds.right}<line {x1} y1={y0} x2={x1} y2={y1} class="cut" />{/if}
-								{/each}
+								<path class="edges" d={edgesPath} />
 
 								{#if caretPos && caretArrow}
 									<polygon
@@ -796,6 +925,25 @@
 							</aside>
 						{/if}
 					</div>
+
+					{#if cubeMounted && cubeModule && sheet && n !== null}
+						{#await cubeModule then { default: CubeView }}
+							<svelte:boundary onerror={resetCube}>
+								<CubeView
+									{view}
+									{n}
+									{cell}
+									{grid}
+									numbers={numbering?.numbers}
+									highlight={clueSet}
+									folded={viewMode === 'cube'}
+									surface={sheet}
+									onready={() => (netHidden = true)}
+									onsettled={cubeSettled}
+								/>
+							</svelte:boundary>
+						{/await}
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -819,7 +967,6 @@
 		--rule: #e6cf5c;
 		--paper: #ffffff;
 		--ink: #161616;
-		--grid-line: #c8ccc9;
 		--run: #fff1a1;
 		--caret: #f4c430;
 		--on-mat: #eef3ef;
@@ -1133,6 +1280,58 @@
 	.quiet {
 		background: transparent;
 	}
+	.pen:disabled,
+	.chip:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+		background: rgb(0 0 0 / 0.18);
+	}
+
+	.seg {
+		height: 2.25rem;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0 0.7rem 0 0.55rem;
+		border: 1px solid rgb(255 255 255 / 0.28);
+		background: rgb(0 0 0 / 0.18);
+		font-size: 0.875rem;
+		font-weight: 500;
+		transition:
+			background 120ms,
+			color 120ms;
+	}
+	.seg:hover {
+		background: rgb(0 0 0 / 0.32);
+	}
+	.seg + .seg {
+		border-left: 0;
+	}
+	.seg:first-child {
+		border-radius: 4px 0 0 4px;
+	}
+	.seg:last-child {
+		border-radius: 0 4px 4px 0;
+	}
+	.seg.on {
+		background: var(--on-mat);
+		border-color: var(--on-mat);
+		color: var(--mat);
+		cursor: default;
+	}
+	.seg svg {
+		width: 18px;
+		height: 18px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linejoin: round;
+		stroke-linecap: round;
+	}
+	.seg svg .crease {
+		stroke-width: 1;
+		stroke-dasharray: 1.5 1.5;
+	}
 
 	.swatch {
 		width: 14px;
@@ -1360,6 +1559,7 @@
 	}
 
 	.stage {
+		position: relative;
 		flex: 1;
 		min-height: 0;
 		display: grid;
@@ -1377,16 +1577,26 @@
 		overflow: visible;
 		filter: drop-shadow(0 6px 10px rgb(0 0 0 / 0.35));
 	}
+	.sheet svg.away {
+		visibility: hidden;
+	}
+	.sheet.cube {
+		cursor: grab;
+		touch-action: none;
+	}
+	.sheet.cube:active {
+		cursor: grabbing;
+	}
+	.sheet.cube:focus-visible {
+		outline: 2px solid var(--rule);
+		outline-offset: 6px;
+	}
 
 	.sq {
 		fill: var(--paper);
-		stroke: var(--grid-line);
-		stroke-width: 1px;
-		vector-effect: non-scaling-stroke;
 	}
 	.sq.black {
 		fill: #000;
-		stroke: #000;
 	}
 	.sq.run {
 		fill: var(--run);
@@ -1411,20 +1621,9 @@
 		dominant-baseline: hanging;
 	}
 
-	line {
-		vector-effect: non-scaling-stroke;
-		stroke-linecap: square;
+	path.edges {
+		fill: #000;
 		pointer-events: none;
-	}
-	line.cut {
-		stroke: var(--ink);
-		stroke-width: 2.5px;
-	}
-	line.fold {
-		stroke: #6d7571;
-		stroke-width: 1.5px;
-		stroke-dasharray: 5 4;
-		stroke-linecap: butt;
 	}
 
 	.arrow {
@@ -1474,6 +1673,7 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.swatch,
+		.seg,
 		.sidebar,
 		.handle {
 			transition: none;
