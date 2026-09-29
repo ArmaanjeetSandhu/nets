@@ -1,9 +1,20 @@
 <script lang="ts">
 	import { T, useTask, useThrelte } from '@threlte/core';
 	import { untrack } from 'svelte';
+	import { devicePixelRatio } from 'svelte/reactivity/window';
 	import * as THREE from 'three';
 	import { normalOf, parseKey, type View } from './cube';
-	import { CUBE_BODY, drawFace, type FaceLook, type FaceStyle } from './faceTexture';
+	import {
+		CUBE_BODY,
+		drawFace,
+		LETTER_NUMBERED_SHIFT,
+		PAPER,
+		RUN,
+		TILE_GAP,
+		TILE_RADIUS,
+		type FaceStyle
+	} from './faceTexture';
+	import { buildGlyphAtlas } from './glyphAtlas';
 
 	type CubeSceneProps = {
 		view: View;
@@ -14,6 +25,7 @@
 		highlight: FaceStyle['highlight'];
 		folded: boolean;
 		surface: HTMLElement;
+		anchor: HTMLElement;
 		onready?: () => void;
 		onsettled?: () => void;
 	};
@@ -27,6 +39,7 @@
 		highlight,
 		folded,
 		surface,
+		anchor,
 		onready,
 		onsettled
 	}: CubeSceneProps = $props();
@@ -47,7 +60,6 @@
 	const SHADE = 0.42;
 	const BACK = new THREE.Color('#dedcd3');
 	const BODY = new THREE.Color(CUBE_BODY);
-	const LOOKS: FaceLook[] = ['net', 'cube'];
 
 	const reduced =
 		typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -68,7 +80,8 @@
 		group: THREE.Group;
 		front: THREE.ShaderMaterial;
 		back: THREE.MeshBasicMaterial;
-		layers: Record<FaceLook, Layer>;
+		net: Layer;
+		cells: THREE.DataTexture;
 		folded: THREE.Quaternion;
 	}
 
@@ -98,17 +111,75 @@
 	`;
 	const FRONT_FRAGMENT = /* glsl */ `
 		uniform sampler2D netMap;
-		uniform sampler2D cubeMap;
+		uniform sampler2D cellMap;
+		uniform sampler2D glyphMap;
+		uniform sampler2D slotMap;
+		uniform float cells;
+		uniform float glyphScale;
+		uniform vec2 glyphSize;
+		uniform vec3 paper;
+		uniform vec3 run;
+		uniform vec3 body;
 		uniform float look;
 		uniform float shade;
 		varying vec2 vUv;
+
+		const float GAP = ${TILE_GAP.toFixed(4)};
+		const float RADIUS = ${TILE_RADIUS.toFixed(4)};
+		const float SHIFT = ${LETTER_NUMBERED_SHIFT.toFixed(4)};
+
+		vec4 glyph(int slot, vec2 f, vec2 dx, vec2 dy) {
+			vec4 rect = texelFetch(slotMap, ivec2(slot * 2, 0), 0);
+			vec2 origin = texelFetch(slotMap, ivec2(slot * 2 + 1, 0), 0).xy;
+			vec2 q = (f - origin) * glyphScale;
+			if (q.x < 0.0 || q.y < 0.0 || q.x > rect.z || q.y > rect.w) return vec4(0.0);
+			vec2 k = glyphScale / glyphSize;
+			return textureGrad(glyphMap, (rect.xy + q) / glyphSize, dx * k, dy * k);
+		}
+
+		vec3 cubeLook() {
+			vec2 p = vec2(vUv.x, 1.0 - vUv.y) * cells;
+			vec2 dx = dFdx(p);
+			vec2 dy = dFdy(p);
+			vec2 cell = clamp(floor(p), 0.0, cells - 1.0);
+			vec2 f = p - cell;
+
+			vec2 e = abs(fract(p) - 0.5) - (0.5 - GAP * 0.5 - RADIUS);
+			float d = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - RADIUS;
+			float aa = max(length(vec2(dFdx(d), dFdy(d))), 1e-5);
+			float cover = clamp(0.5 - d / aa, 0.0, 1.0);
+
+			ivec4 data = ivec4(texelFetch(cellMap, ivec2(cell), 0) + 0.5);
+			if (data.r == 0) return body;
+			vec3 col = mix(body, data.r == 2 ? run : paper, cover);
+			vec4 g;
+			if (data.g > 0) {
+				g = glyph(data.g - 1, f - vec2(0.0, data.b > 0 ? SHIFT : 0.0), dx, dy);
+				col = col * (1.0 - g.a) + g.rgb;
+			}
+			if (data.b > 0) {
+				g = glyph(data.b - 1, f, dx, dy);
+				col = col * (1.0 - g.a) + g.rgb;
+			}
+			return col;
+		}
+
 		void main() {
 			vec3 net = texture2D(netMap, vUv).rgb;
-			vec3 cube = texture2D(cubeMap, vUv).rgb;
+			vec3 cube = cubeLook();
 			gl_FragColor = vec4(mix(net, cube, look) * shade, 1.0);
 			#include <colorspace_fragment>
 		}
 	`;
+
+	const glyphs = {
+		glyphMap: { value: null as THREE.Texture | null },
+		slotMap: { value: null as THREE.DataTexture | null },
+		glyphScale: { value: 1 },
+		glyphSize: { value: new THREE.Vector2(1, 1) }
+	};
+	let atlasKey = '';
+	let glyphSlots: ReturnType<typeof buildGlyphAtlas> | null = null;
 
 	function makeTexture(canvas: HTMLCanvasElement) {
 		const t = new THREE.CanvasTexture(canvas);
@@ -139,15 +210,24 @@
 
 		const faces: FaceNode[] = v.faces.map((_, index) => {
 			const group = new THREE.Group();
-			const layer = (): Layer => {
-				const canvas = document.createElement('canvas');
-				return { canvas, texture: makeTexture(canvas) };
-			};
-			const layers = { net: layer(), cube: layer() };
+			const canvas = document.createElement('canvas');
+			const net: Layer = { canvas, texture: makeTexture(canvas) };
+			const cells = new THREE.DataTexture(
+				new Float32Array(size * size * 4),
+				size,
+				size,
+				THREE.RGBAFormat,
+				THREE.FloatType
+			);
 			const front = new THREE.ShaderMaterial({
 				uniforms: {
-					netMap: { value: layers.net.texture },
-					cubeMap: { value: layers.cube.texture },
+					netMap: { value: net.texture },
+					cellMap: { value: cells },
+					...glyphs,
+					cells: { value: size },
+					paper: { value: new THREE.Color(PAPER) },
+					run: { value: new THREE.Color(RUN) },
+					body: { value: BODY },
 					look: { value: 0 },
 					shade: { value: 1 }
 				},
@@ -157,7 +237,7 @@
 			});
 			const back = new THREE.MeshBasicMaterial({ color: BACK, side: THREE.BackSide });
 			group.add(new THREE.Mesh(geometry, front), new THREE.Mesh(geometry, back));
-			return { index, group, front, back, layers, folded: new THREE.Quaternion() };
+			return { index, group, front, back, net, cells, folded: new THREE.Quaternion() };
 		});
 
 		const rf = v.faces[root];
@@ -224,8 +304,8 @@
 		content.remove(s.root);
 		s.geometry.dispose();
 		for (const f of s.faces) {
-			f.layers.net.texture.dispose();
-			f.layers.cube.texture.dispose();
+			f.net.texture.dispose();
+			f.cells.dispose();
 			f.front.dispose();
 			f.back.dispose();
 		}
@@ -252,6 +332,7 @@
 	const q = new THREE.Quaternion();
 	const omega = new THREE.Vector3();
 	const pos = new THREE.Vector3();
+	const shift = new THREE.Vector3();
 	let flatSize = 1;
 	let cubeSize = 1;
 	let scale = 1;
@@ -266,7 +347,6 @@
 
 	let built = $state(0);
 	let fontsTick = $state(0);
-	let cubeCell = $state(0);
 
 	function rebuild(v: View, size: number) {
 		const old = s;
@@ -312,7 +392,6 @@
 		void fontsTick;
 		const v = view;
 		const size = n;
-		const shown: Record<FaceLook, number> = { net: cell, cube: Math.max(cell, cubeCell) };
 		const black = new Set(
 			[...v.pos].filter(([key]) => grid[key]?.black).map(([, p]) => `${p.col},${p.row}`)
 		);
@@ -323,20 +402,79 @@
 			blackAt: (col, row) => black.has(`${col},${row}`)
 		};
 		if (!s || s.view !== v) return;
-		const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-		for (const look of LOOKS) {
-			const c = shown[look];
-			const px = Math.max(16, Math.min(Math.floor(1024 / size), Math.round(c * dpr)));
-			for (const f of s.faces) {
-				const layer = f.layers[look];
-				const resized = layer.canvas.width !== size * px;
-				drawFace(layer.canvas, v.faces[f.index], size, px, px / c, style, look);
-				if (resized) {
-					layer.texture.dispose();
-					layer.texture = makeTexture(layer.canvas);
-					f.front.uniforms[`${look}Map`].value = layer.texture;
-				} else layer.texture.needsUpdate = true;
+
+		const dpr = devicePixelRatio.current ?? 1;
+		const px = Math.max(16, Math.min(Math.floor(1024 / size), Math.round(cell * dpr)));
+		for (const f of s.faces) {
+			const layer = f.net;
+			const resized = layer.canvas.width !== size * px;
+			drawFace(layer.canvas, v.faces[f.index], size, px, px / cell, style);
+			if (resized) {
+				layer.texture.dispose();
+				layer.texture = makeTexture(layer.canvas);
+				f.front.uniforms.netMap.value = layer.texture;
+			} else layer.texture.needsUpdate = true;
+		}
+
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local, not state
+		const letters = new Set<string>();
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local, not state
+		const nums = new Set<number>();
+		for (const face of v.faces)
+			for (const key of face.cells.flat()) {
+				const sq = grid[key];
+				if (!sq || sq.black) continue;
+				if (sq.letter) letters.add(sq.letter);
+				const num = numbers?.get(key);
+				if (num) nums.add(num);
 			}
+		const letterList = [...letters].sort();
+		const numberList = [...nums].sort((a, b) => a - b);
+		const key = `${fontsTick}|${numberList.join(',')}|${letterList.join('\u0000')}`;
+		if (key !== atlasKey || !glyphs.glyphMap.value) {
+			atlasKey = key;
+			const gl = (renderer as THREE.WebGLRenderer).capabilities;
+			const atlas = buildGlyphAtlas(letterList, numberList, gl?.maxTextureSize ?? 4096);
+			glyphs.glyphMap.value?.dispose();
+			glyphs.slotMap.value?.dispose();
+			const texture = makeTexture(atlas.canvas);
+			texture.flipY = false;
+			texture.premultiplyAlpha = true;
+			glyphs.glyphMap.value = texture;
+			const slotMap = new THREE.DataTexture(
+				atlas.slots,
+				atlas.slots.length / 4,
+				1,
+				THREE.RGBAFormat,
+				THREE.FloatType
+			);
+			slotMap.needsUpdate = true;
+			glyphs.slotMap.value = slotMap;
+			glyphs.glyphScale.value = atlas.scale;
+			glyphs.glyphSize.value.set(atlas.canvas.width, atlas.canvas.height);
+			glyphSlots = atlas;
+		}
+
+		const atlas = glyphSlots!;
+		for (const f of s.faces) {
+			const data = f.cells.image.data as Float32Array;
+			const rows = v.faces[f.index].cells;
+			for (let r = 0; r < size; r++)
+				for (let c = 0; c < size; c++) {
+					const key = rows[r][c];
+					const sq = grid[key];
+					const i = (r * size + c) * 4;
+					if (!sq || sq.black) {
+						data.fill(0, i, i + 4);
+						continue;
+					}
+					const num = numbers?.get(key);
+					data[i] = highlight.has(key) ? 2 : 1;
+					data[i + 1] = sq.letter ? atlas.letters.get(sq.letter)! + 1 : 0;
+					data[i + 2] = num ? atlas.numbers.get(num)! + 1 : 0;
+					data[i + 3] = 0;
+				}
+			f.cells.needsUpdate = true;
 		}
 		invalidate();
 	});
@@ -344,6 +482,11 @@
 	$effect(() => () => {
 		if (s) dispose(s);
 		s = null;
+		glyphs.glyphMap.value?.dispose();
+		glyphs.slotMap.value?.dispose();
+		glyphs.glyphMap.value = null;
+		glyphs.slotMap.value = null;
+		atlasKey = '';
 	});
 
 	let settled = false;
@@ -391,7 +534,7 @@
 	const normal = new THREE.Vector3();
 	function pose() {
 		scale = flatSize + (cubeSize - flatSize) * fold;
-		pivot.position.copy(pos);
+		pivot.position.copy(pos).add(shift);
 		pivot.scale.setScalar(scale);
 		pivot.quaternion.copy(q);
 		if (!s) return;
@@ -502,12 +645,19 @@
 			let changed = false;
 
 			const a = surface.getBoundingClientRect();
+			const o = anchor.getBoundingClientRect();
 			const d = dom.getBoundingClientRect();
 			target.set(
-				a.left + a.width / 2 - (d.left + d.width / 2),
-				-(a.top + a.height / 2 - (d.top + d.height / 2)),
+				a.left + a.width / 2 - (o.left + o.width / 2),
+				-(a.top + a.height / 2 - (o.top + o.height / 2)),
 				0
 			);
+			const sx = o.left + o.width / 2 - (d.left + d.width / 2);
+			const sy = -(o.top + o.height / 2 - (d.top + d.height / 2));
+			if (shift.x !== sx || shift.y !== sy) {
+				shift.set(sx, sy, 0);
+				changed = true;
+			}
 			const fit = Math.max(cell, Math.min(a.width, a.height) / (1.85 * n));
 			if (frames === 1) {
 				pos.copy(target);
@@ -550,7 +700,6 @@
 				pose();
 				invalidate();
 			}
-			if (Math.abs(cubeCell - fit) > 2) cubeCell = fit;
 
 			if (!folded && !settled && !active && !steps.length && fold === 0 && q.equals(FLAT)) {
 				if (pos.distanceToSquared(target) < 0.25 && Math.abs(flatSize - cell) < 0.01) {
