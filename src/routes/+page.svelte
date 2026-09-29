@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import NetIcon from '$lib/NetIcon.svelte';
-	import { edgeBars } from '$lib/edges';
+	import { edgeBars, foldHidden } from '$lib/edges';
 	import {
 		NETS,
 		FAMILIES,
@@ -194,13 +194,24 @@
 	});
 	const cell = $derived(cellDev / dpr);
 
+	const blackAt = $derived.by(() => {
+		const black = new Set(
+			[...(view?.pos ?? [])].filter(([key]) => grid[key]?.black).map(([, p]) => `${p.col},${p.row}`)
+		);
+		return (col: number, row: number) => black.has(`${col},${row}`);
+	});
+
 	const edgesPath = $derived.by(() => {
-		if (!view || n === null) return '';
+		if (!view || n === null) return { ink: '', paper: '' };
 		const k = 1 / cellDev;
-		let d = '';
+		const d = { ink: '', paper: '' };
 		for (const face of view.faces)
-			for (const b of edgeBars(face.folds, n, cellDev, dpr, false))
-				d += `M${face.col + b.x * k} ${face.row + b.y * k}h${b.w * k}v${b.h * k}h${-b.w * k}z`;
+			for (const b of edgeBars(face.folds, n, cellDev, dpr, false)) {
+				const seg = `M${face.col + b.x * k} ${face.row + b.y * k}h${b.w * k}v${b.h * k}h${-b.w * k}z`;
+				const hidden = b.fold && foldHidden(face, n, b.fold, blackAt);
+				if (hidden) d.paper += seg;
+				else d.ink += seg;
+			}
 		return d;
 	});
 
@@ -837,7 +848,8 @@
 									{/each}
 								{/each}
 
-								<path class="edges" d={edgesPath} />
+								<path class="edges" d={edgesPath.ink} />
+								<path class="edges paper" d={edgesPath.paper} />
 
 								{#if caretPos && caretArrow}
 									<polygon
@@ -1624,6 +1636,9 @@
 	path.edges {
 		fill: #000;
 		pointer-events: none;
+	}
+	path.edges.paper {
+		fill: #fff;
 	}
 
 	.arrow {

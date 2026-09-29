@@ -1,10 +1,11 @@
 import type { ViewFace } from './cube';
-import { edgeBars } from './edges';
+import { edgeBars, foldHidden } from './edges';
 
 export interface FaceStyle {
 	grid: Record<string, { black: boolean; letter: string }>;
 	numbers: ReadonlyMap<string, number> | undefined;
 	highlight: ReadonlySet<string>;
+	blackAt?: (col: number, row: number) => boolean;
 }
 
 export type FaceLook = 'net' | 'cube';
@@ -91,10 +92,12 @@ export function drawFace(
 
 	if (look === 'cube') return;
 
-	ctx.fillStyle = EDGE_COLOR;
+	const blackAt = style.blackAt;
 	for (const b of edgeBars(face.folds, n, px, ls, true)) {
 		const x = b.cut && b.x + b.w <= 0 ? 0 : b.x;
 		const y = b.cut && b.y + b.h <= 0 ? 0 : b.y;
+		const hidden = b.fold && blackAt && foldHidden(face, n, b.fold, blackAt);
+		ctx.fillStyle = hidden ? PAPER : EDGE_COLOR;
 		ctx.fillRect(x, y, b.w, b.h);
 	}
 }

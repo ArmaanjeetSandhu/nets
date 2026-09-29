@@ -313,7 +313,15 @@
 		const v = view;
 		const size = n;
 		const shown: Record<FaceLook, number> = { net: cell, cube: Math.max(cell, cubeCell) };
-		const style: FaceStyle = { grid, numbers, highlight };
+		const black = new Set(
+			[...v.pos].filter(([key]) => grid[key]?.black).map(([, p]) => `${p.col},${p.row}`)
+		);
+		const style: FaceStyle = {
+			grid,
+			numbers,
+			highlight,
+			blackAt: (col, row) => black.has(`${col},${row}`)
+		};
 		if (!s || s.view !== v) return;
 		const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
 		for (const look of LOOKS) {
