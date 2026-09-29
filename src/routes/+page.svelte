@@ -185,14 +185,29 @@
 		return () => mq?.removeEventListener('change', update);
 	});
 
-	const cellDev = $derived.by(() => {
-		if (!view) return Math.round(32 * dpr);
+	const room: { w: number; h: number } = $derived.by(() => {
 		const side = numbering && !narrow ? panelW + PANEL_GAP : 0;
 		const below = numbering && narrow ? panelH + PANEL_GAP : 0;
-		const fit = Math.min((stageW - 48 - side) / view.cols, (stageH - 48 - below) / view.rows);
-		return Math.max(Math.round(12 * dpr), Math.min(Math.round(64 * dpr), Math.floor(fit * dpr)));
+		return { w: stageW - 48 - side, h: stageH - 48 - below };
+	});
+	const clampCell = (fit: number) =>
+		Math.max(Math.round(12 * dpr), Math.min(Math.round(64 * dpr), Math.floor(fit * dpr)));
+
+	const cellDev = $derived.by(() => {
+		if (!view) return Math.round(32 * dpr);
+		return clampCell(Math.min(room.w / view.cols, room.h / view.rows));
 	});
 	const cell = $derived(cellDev / dpr);
+
+	const reference: { rows: number; cell: number } | null = $derived.by(() => {
+		if (!view || n === null) return null;
+		const tall = view.rows > view.cols;
+		const rows = (tall ? 4 : 3) * n;
+		const cols = (tall ? 3 : 4) * n;
+		return { rows, cell: clampCell(Math.min(room.w / cols, room.h / rows)) / dpr };
+	});
+
+	const cubeSpan = $derived(reference && n !== null ? 3 * n * reference.cell : 0);
 
 	const blackAt = $derived.by(() => {
 		const black = new Set(
@@ -251,7 +266,15 @@
 	const panelW = $derived(
 		narrow ? Math.max(0, stageW - 48) : Math.round(Math.min(384, Math.max(256, stageW * 0.3)))
 	);
-	const panelH = $derived(narrow ? Math.round(stageH * 0.4) : view ? view.rows * cell : 0);
+	const panelH = $derived(
+		narrow
+			? Math.round(stageH * 0.4)
+			: viewMode === 'cube' && reference
+				? reference.rows * reference.cell
+				: view
+					? view.rows * cell
+					: 0
+	);
 
 	const runSet = $derived(new Set(editing?.run.keys ?? []));
 	const caretKey = $derived(editing ? editing.run.keys[editing.idx] : null);
@@ -790,7 +813,7 @@
 				</header>
 
 				<div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
-					<div class="layout" class:narrow bind:this={layoutEl}>
+					<div class="layout" class:narrow class:cube={viewMode === 'cube'} bind:this={layoutEl}>
 						<!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
 						<div
 							bind:this={sheet}
@@ -945,6 +968,7 @@
 									{view}
 									{n}
 									{cell}
+									{cubeSpan}
 									{grid}
 									numbers={numbering?.numbers}
 									highlight={clueSet}
@@ -1444,6 +1468,9 @@
 	}
 	.layout.narrow {
 		flex-direction: column;
+		align-items: center;
+	}
+	.layout.cube {
 		align-items: center;
 	}
 

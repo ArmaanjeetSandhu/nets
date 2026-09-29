@@ -20,6 +20,7 @@
 		view: View;
 		n: number;
 		cell: number;
+		cubeSpan: number;
 		grid: FaceStyle['grid'];
 		numbers?: FaceStyle['numbers'];
 		highlight: FaceStyle['highlight'];
@@ -34,6 +35,7 @@
 		view,
 		n,
 		cell,
+		cubeSpan,
 		grid,
 		numbers,
 		highlight,
@@ -658,7 +660,7 @@
 				shift.set(sx, sy, 0);
 				changed = true;
 			}
-			const fit = Math.max(cell, Math.min(a.width, a.height) / (1.85 * n));
+			const fit = Math.max(cell, cubeSpan / (1.85 * n));
 			if (frames === 1) {
 				pos.copy(target);
 				flatSize = cell;
