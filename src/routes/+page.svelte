@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import Halftone from '$lib/Halftone.svelte';
 	import NetIcon from '$lib/NetIcon.svelte';
 	import { edgeBars, foldHidden } from '$lib/edges';
 	import {
@@ -573,6 +574,7 @@
 />
 
 <main class="mat">
+	<Halftone />
 	{#if n === null}
 		<section class="setup">
 			<h1>Nets</h1>
@@ -829,6 +831,16 @@
 							tabindex={viewMode === 'cube' ? 0 : undefined}
 							onmousedown={keepFocus}
 						>
+							<div class="shadow" class:away={netHidden} aria-hidden="true">
+								{#each view.faces as face, fi (fi)}
+									<div
+										style:left="{face.col * cell}px"
+										style:top="{face.row * cell}px"
+										style:width="{face.cells.length * cell}px"
+										style:height="{face.cells.length * cell}px"
+									></div>
+								{/each}
+							</div>
 							<svg
 								class:away={netHidden}
 								aria-hidden={netHidden}
@@ -998,7 +1010,6 @@
 
 	.mat {
 		--mat: #2f5b4c;
-		--dot-pitch: 9px;
 		--halftone-strength: 0.1;
 		--rule: #e6cf5c;
 		--paper: #ffffff;
@@ -1017,26 +1028,6 @@
 		background-color: var(--mat);
 		position: relative;
 		isolation: isolate;
-	}
-
-	.mat::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		z-index: -1;
-		pointer-events: none;
-		background-image:
-			radial-gradient(circle closest-side, #fff, #000),
-			radial-gradient(ellipse 85% 85% at 0% 0%, #fff, #6e6e6e 100%),
-			radial-gradient(ellipse 85% 85% at 100% 100%, #fff, #6e6e6e 100%);
-		background-size:
-			var(--dot-pitch) var(--dot-pitch),
-			100% 100%,
-			100% 100%;
-		background-blend-mode: multiply, lighten, normal;
-		filter: contrast(24);
-		mix-blend-mode: screen;
-		opacity: var(--halftone-strength);
 	}
 
 	@media (prefers-color-scheme: dark) {
@@ -1611,11 +1602,21 @@
 		user-select: none;
 		-webkit-user-select: none;
 	}
+	.shadow {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+	}
+	.shadow div {
+		position: absolute;
+		box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+	}
 	.sheet svg {
+		position: relative;
 		display: block;
 		overflow: visible;
-		filter: drop-shadow(0 6px 10px rgb(0 0 0 / 0.35));
 	}
+	.shadow.away,
 	.sheet svg.away {
 		visibility: hidden;
 	}
