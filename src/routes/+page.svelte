@@ -45,12 +45,12 @@
 	let transform = $state<Transform>(IDENTITY);
 	const view = $derived(n === null ? null : buildView(netIndex, transform, n));
 
-	const complete = $derived(
-		n !== null && Object.values(grid).every((sq) => sq.black || sq.letter !== '')
-	);
 	const numbering = $derived(
-		complete && view && n !== null ? numberEntries(view, (k) => grid[k].black, n) : null
+		view && n !== null ? numberEntries(view, (k) => grid[k].black, n) : null
 	);
+
+	const BLANK = '·';
+	const EMPTY = '0';
 
 	type ClueRow = { id: string; number: number; word: string; keys: string[] };
 
@@ -64,7 +64,7 @@
 			lists[e.axis].push({
 				id: `${e.axis}:${e.keys.join('|')}`,
 				number: e.number,
-				word: e.keys.map((k) => grid[k].letter).join(''),
+				word: e.keys.map((k) => grid[k].letter || BLANK).join(''),
 				keys: e.keys
 			});
 		}
@@ -89,6 +89,9 @@
 	function download() {
 		if (!numbering || n === null) return;
 		const puzzleTitle = title.trim();
+		const squares: Record<string, Square> = {};
+		for (const [k, sq] of Object.entries(grid))
+			squares[k] = { black: sq.black, letter: sq.black ? '' : sq.letter || EMPTY };
 		const written: Record<string, string> = {};
 		const entries = numbering.entries.map((e) => {
 			const id = `${e.axis}:${e.keys.join('|')}`;
@@ -99,7 +102,7 @@
 				number: e.number,
 				axis: e.axis,
 				cells: e.keys,
-				answer: e.keys.map((k) => grid[k].letter).join(''),
+				answer: e.keys.map((k) => squares[k].letter).join(''),
 				...(clue !== undefined && { clue })
 			};
 		});
@@ -108,7 +111,8 @@
 			version: 1,
 			...(puzzleTitle && { title: puzzleTitle }),
 			size: n,
-			grid: $state.snapshot(grid),
+			empty: EMPTY,
+			grid: squares,
 			clues: written,
 			layout: { netIndex, transform: [...transform] },
 			entries
@@ -224,8 +228,8 @@
 	});
 
 	const room: { w: number; h: number } = $derived.by(() => {
-		const side = numbering && !narrow ? panelW + PANEL_GAP : 0;
-		const below = numbering && narrow ? panelH + PANEL_GAP : 0;
+		const side = narrow ? 0 : panelW + PANEL_GAP;
+		const below = narrow ? panelH + PANEL_GAP : 0;
 		return { w: stageW - 48 - side, h: stageH - 48 - below };
 	});
 	const clampCell = (fit: number) =>
@@ -283,7 +287,7 @@
 	}
 	let layoutEl = $state<HTMLDivElement>();
 	$effect(() => {
-		void [cellDev, dpr, view, numbering, sidebarOpen, winW];
+		void [cellDev, dpr, view, sidebarOpen, winW];
 		const els = [layoutEl, sheet].filter((e): e is HTMLDivElement => !!e);
 		if (!els.length) return;
 		let frame = 0;
@@ -375,13 +379,16 @@
 			throw new Error(`Face size must be between ${MIN_N} and ${MAX_N}.`);
 		if (typeof d.grid !== 'object' || d.grid === null) throw new Error('The grid is missing.');
 		const src = d.grid as Record<string, unknown>;
+		const empty =
+			typeof d.empty === 'string' || typeof d.empty === 'number' ? String(d.empty) : EMPTY;
 		const fresh: Record<string, Square> = {};
 		for (const k of allKeys(size)) {
 			const sq = src[k] as Record<string, unknown> | undefined;
 			if (typeof sq !== 'object' || sq === null) throw new Error('The grid is incomplete.');
 			const black = sq.black === true;
-			const letter = typeof sq.letter === 'string' ? sq.letter.trim().toLocaleUpperCase() : '';
-			fresh[k] = { black, letter: black ? '' : letter };
+			const filled = typeof sq.letter === 'string' ? sq.letter.trim() : '';
+			const letter = black || filled === empty ? '' : filled.toLocaleUpperCase();
+			fresh[k] = { black, letter };
 		}
 		const importedClues: Record<string, string> = {};
 		if (typeof d.clues === 'object' && d.clues !== null)
@@ -915,19 +922,17 @@
 								</button>
 							</div>
 
-							{#if numbering}
-								<button
-									class="chip"
-									onmousedown={keepFocus}
-									onclick={download}
-									title="Download the puzzle as JSON"
-								>
-									<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-										<path d="M8 2v8.5M4.5 7 8 10.5 11.5 7M2.5 13.5h11" />
-									</svg>
-									Download
-								</button>
-							{/if}
+							<button
+								class="chip"
+								onmousedown={keepFocus}
+								onclick={download}
+								title="Download the puzzle as JSON"
+							>
+								<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+									<path d="M8 2v8.5M4.5 7 8 10.5 11.5 7M2.5 13.5h11" />
+								</svg>
+								Download
+							</button>
 						</div>
 					</div>
 				</header>
@@ -1030,65 +1035,63 @@
 							/>
 						</div>
 
-						{#if numbering}
-							<aside
-								class="clues"
-								aria-label="Clues"
-								style:width="{panelW}px"
-								style:height="{panelH}px"
-							>
-								<div class="title-field">
-									<input
-										id="puzzle-title"
-										type="text"
-										placeholder="Untitled puzzle"
-										autocomplete="off"
-										spellcheck="true"
-										bind:value={title}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === 'Escape') {
-												e.preventDefault();
-												e.currentTarget.blur();
-											}
-										}}
-									/>
-								</div>
-								{#each [['across', 'Across'], ['down', 'Down']] as const as [ax, title] (ax)}
-									<section class="clue-col">
-										<h2>{title}</h2>
-										{#if clueLists[ax].length === 0}
-											<p class="empty">No {ax} entries.</p>
-										{:else}
-											<ol>
-												{#each clueLists[ax] as c (c.id)}
-													<li class:active={activeClue === c.id}>
-														<label for="clue-{c.id}" class="clue-num">{c.number}</label>
-														<textarea
-															id="clue-{c.id}"
-															rows="1"
-															value={clueText(c)}
-															aria-label="{c.number} {title}, {c.word}"
-															spellcheck="true"
-															oninput={(e) => (clues[c.id] = e.currentTarget.value)}
-															onfocus={() => (activeClue = c.id)}
-															onblur={() => {
-																if (activeClue === c.id) activeClue = null;
-															}}
-															onkeydown={(e) => {
-																if (e.key === 'Enter' || e.key === 'Escape') {
-																	e.preventDefault();
-																	e.currentTarget.blur();
-																}
-															}}></textarea>
-														<span class="answer">{c.word} ({c.word.length})</span>
-													</li>
-												{/each}
-											</ol>
-										{/if}
-									</section>
-								{/each}
-							</aside>
-						{/if}
+						<aside
+							class="clues"
+							aria-label="Clues"
+							style:width="{panelW}px"
+							style:height="{panelH}px"
+						>
+							<div class="title-field">
+								<input
+									id="puzzle-title"
+									type="text"
+									placeholder="Untitled puzzle"
+									autocomplete="off"
+									spellcheck="true"
+									bind:value={title}
+									onkeydown={(e) => {
+										if (e.key === 'Enter' || e.key === 'Escape') {
+											e.preventDefault();
+											e.currentTarget.blur();
+										}
+									}}
+								/>
+							</div>
+							{#each [['across', 'Across'], ['down', 'Down']] as const as [ax, title] (ax)}
+								<section class="clue-col">
+									<h2>{title}</h2>
+									{#if clueLists[ax].length === 0}
+										<p class="empty">No {ax} entries.</p>
+									{:else}
+										<ol>
+											{#each clueLists[ax] as c (c.id)}
+												<li class:active={activeClue === c.id}>
+													<label for="clue-{c.id}" class="clue-num">{c.number}</label>
+													<textarea
+														id="clue-{c.id}"
+														rows="1"
+														value={clueText(c)}
+														aria-label="{c.number} {title}, {c.word}"
+														spellcheck="true"
+														oninput={(e) => (clues[c.id] = e.currentTarget.value)}
+														onfocus={() => (activeClue = c.id)}
+														onblur={() => {
+															if (activeClue === c.id) activeClue = null;
+														}}
+														onkeydown={(e) => {
+															if (e.key === 'Enter' || e.key === 'Escape') {
+																e.preventDefault();
+																e.currentTarget.blur();
+															}
+														}}></textarea>
+													<span class="answer">{c.word} ({c.word.length})</span>
+												</li>
+											{/each}
+										</ol>
+									{/if}
+								</section>
+							{/each}
+						</aside>
 					</div>
 
 					{#if cubeMounted && cubeModule && sheet && n !== null}
@@ -1120,6 +1123,12 @@
 	:global(html, body) {
 		margin: 0;
 		height: 100%;
+	}
+	:global(*) {
+		scrollbar-width: none;
+	}
+	:global(*::-webkit-scrollbar) {
+		display: none;
 	}
 	:global(body) {
 		font-family: 'Libre Franklin', 'Helvetica Neue', Arial, sans-serif;
