@@ -94,19 +94,14 @@ export const NETS: readonly NetShape[] = [
 
 export interface NetFamily {
 	name: string;
-	description: string;
 	nets: readonly number[];
 }
 
 export const FAMILIES: readonly NetFamily[] = [
-	{
-		name: '1-4-1',
-		description: 'A strip of four with one flap on each side',
-		nets: [0, 1, 2, 3, 4, 5]
-	},
-	{ name: '2-3-1', description: 'Rows of two, three and one', nets: [6, 7, 8] },
-	{ name: '2-2-2', description: 'Three rows of two, a staircase', nets: [9] },
-	{ name: '3-3', description: 'Two rows of three', nets: [10] }
+	{ name: '1-4-1', nets: [0, 1, 2, 3, 4, 5] },
+	{ name: '2-3-1', nets: [6, 7, 8] },
+	{ name: '2-2-2', nets: [9] },
+	{ name: '3-3', nets: [10] }
 ];
 
 const add = (a: Vec, b: Vec): Vec => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
